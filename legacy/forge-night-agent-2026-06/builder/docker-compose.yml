@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  builder-main:
+    build: .
+    container_name: builder-main
+    restart: unless-stopped
+    cpus: "12"
+    mem_limit: 32g
+    env_file: .env
+    volumes:
+      - ./:/app/builder
+      - ../core:/app/core
+      - ./projects:/app/builder/projects
+      - ./skills:/app/builder/skills
+      - ./data:/app/builder/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - PYTHONPATH=/app
+    # Allowed outbound:
+    # host.docker.internal:11434 (Ollama — models run on host)
+    # roblox.com, devforum.roblox.com
+    # youtube.com, reddit.com
+    # NO ALPACA — enforced at network level

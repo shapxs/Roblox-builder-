@@ -1,0 +1,10 @@
+.DS_Store
+**/artifacts/*
+!**/artifacts/.gitkeep
+**/Packages/
+**/ServerPackages/
+*.rbxl.lock
+*.rbxlx.lock
+.env
+legacy/**/.env
+legacy/**/*.duckdb
