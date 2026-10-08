@@ -6,6 +6,7 @@
   hang:    [tool names]                   tools that never answer
   players: int                            readiness-poll answer (default 1)
   health / client: dict                   HEALTH server / client answers
+  health_seq: [dict|str]                  successive HEALTH server answers
   attributes / screens                    scenario assertion answers
   log:     path                           append every tools/call as a JSON line
 """
@@ -15,6 +16,7 @@ import sys
 
 cfg = json.loads(os.environ.get("FAKE_MCP", "{}"))
 TINY_JPEG = "/9j/4AAQSkZJRgABAgAAAQABAAD//gAPTGF2YzYzLjEuMTAyAP/bAEMACAQEBAQEBQUFBQUFBgYGBgYGBgYGBgYGBgcHBwgICAcHBwYGBwcICAgICQkJCAgICAkJCgoKDAwLCw4ODhERFP/EAEwAAQEAAAAAAAAAAAAAAAAAAAAGAQEBAAAAAAAAAAAAAAAAAAAABhABAAAAAAAAAAAAAAAAAAAAABEBAAAAAAAAAAAAAAAAAAAAAP/AABEIACQAQAMBIgACEQADEQD/2gAMAwEAAhEDEQA/AIsBKIkAAAAAAAAAAAAAAAAAAAAAB//Z"
+health_calls = 0
 # Like the real proxy, list_roblox_studios is callable but never advertised.
 tools = cfg.get("tools", [])
 
@@ -51,7 +53,14 @@ for line in sys.stdin:
         elif name == "execute_luau" and args.get("code", "").startswith("return #game"):
             text = str(cfg.get("players", 1))  # playtest readiness poll
         elif name == "execute_luau" and "ForgeReady" in args.get("code", ""):
-            text = json.dumps(cfg.get("health", {"ready": True, "players": [], "errors": []}))
+            seq = cfg.get("health_seq")  # successive answers, last one repeats
+            if seq:
+                answer = seq[min(health_calls, len(seq) - 1)]
+                health_calls += 1
+            else:
+                answer = cfg.get("health", {"ready": True, "errors": [],
+                                            "players": [{"name": "p", "ready": True}]})
+            text = answer if isinstance(answer, str) else json.dumps(answer)
         elif name == "execute_luau" and "PlayerGui" in args.get("code", ""):
             if "g.Enabled" in args.get("code", ""):  # scenario ui_visible check
                 text = json.dumps(cfg.get("screens", ["MainHUD"]))

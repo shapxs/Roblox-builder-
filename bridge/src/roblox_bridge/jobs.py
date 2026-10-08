@@ -18,8 +18,8 @@ from roblox_bridge.ops import Bridge, Op
 from roblox_bridge.scenario import NAME as SCENARIO_NAME
 
 JOB_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-ALLOWED_KEYS = {"job_id", "ops", "studio_id", "dry_run", "timeout_seconds", "project_dir",
-                "scenario"}
+ALLOWED_KEYS = {"job_id", "ops", "studio_id", "studio_name", "dry_run", "timeout_seconds",
+                "project_dir", "scenario"}
 # Screenshots and preview video land in <capture root>/<job_id>-<timestamp>/.
 DEFAULT_CAPTURE_ROOT = "~/Roblox Games/artifacts/captures"
 # SYNC may only read projects under these roots (colon-separated override in env).
@@ -38,8 +38,10 @@ CHECKS: dict[str, list[Op]] = {
     "core": [Op.LIST_STUDIOS, Op.SYNC, Op.START_PLAYTEST, Op.HEALTH, Op.GET_LOGS,
              Op.STOP_PLAYTEST],
     # `capture`: core plus a scripted scenario recorded to screenshots and a preview MP4.
+    # HEALTH runs again after the scenario: errors raised by selling, upgrading or UI
+    # updates happen after the first check and must still fail the run.
     "capture": [Op.LIST_STUDIOS, Op.SYNC, Op.START_PLAYTEST, Op.HEALTH, Op.SCENARIO,
-                Op.GET_LOGS, Op.STOP_PLAYTEST],
+                Op.HEALTH, Op.GET_LOGS, Op.STOP_PLAYTEST],
 }
 
 
@@ -93,6 +95,9 @@ def parse_job(raw: dict) -> dict:
     studio_id = raw.get("studio_id")
     if studio_id is not None and not isinstance(studio_id, str):
         raise JobError("studio_id must be a string")
+    studio_name = raw.get("studio_name")
+    if studio_name is not None and (not isinstance(studio_name, str) or not studio_name.strip()):
+        raise JobError("studio_name must be a non-empty string")
     project_dir = _project_dir(raw.get("project_dir"))
     if Op.SYNC in parsed_ops and project_dir is None:
         raise JobError("SYNC requires project_dir")
@@ -109,6 +114,7 @@ def parse_job(raw: dict) -> dict:
         "scenario": scenario,
         "ops": parsed_ops,
         "studio_id": studio_id,
+        "studio_name": studio_name,
         "dry_run": bool(raw.get("dry_run", False)),
         "timeout_seconds": timeout,
     }
@@ -127,31 +133,32 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
                         client_factory=client_factory)
         playing = False
         failed = False
-        for op in job["ops"]:
-            if op is Op.STOP_PLAYTEST and not playing and Op.START_PLAYTEST in job["ops"]:
-                continue  # never started, nothing to stop
-            if failed and op not in DIAGNOSTIC_OPS:
-                continue  # after a failure, only collect evidence (and clean up below)
-            res = bridge.run(op)
-            results.append(res.to_dict())
-            if op is Op.LIST_STUDIOS and res.ok and bridge.studio_id is None:
-                bridge.studio_id = _pick_studio(res.data)
-                if bridge.studio_id is None and not job["dry_run"]:
-                    count = _studio_count(res.data)
-                    reason = ("no Roblox Studio is connected: open Studio and enable "
-                              "'Studio as MCP server'" if count == 0 else
-                              f"{count} Studios are open: pass an explicit studio_id")
-                    results[-1].update(status="FAIL", ok=False, error=reason)
-                    break
-            if op is Op.START_PLAYTEST and res.status not in {"UNSUPPORTED", "DRY_RUN"}:
-                playing = True  # a start that timed out or failed may still have begun play
-            if op is Op.STOP_PLAYTEST and res.ok:
-                playing = False
-            if not res.ok and op not in DIAGNOSTIC_OPS:
-                failed = True
-        if playing:  # cleanup: never leave a playtest running
-            res = bridge.run(Op.STOP_PLAYTEST)
-            results.append(res.to_dict() | {"cleanup": True})
+        try:
+            for op in job["ops"]:
+                if op is Op.STOP_PLAYTEST and not playing and Op.START_PLAYTEST in job["ops"]:
+                    continue  # never started, nothing to stop
+                if failed and op not in DIAGNOSTIC_OPS:
+                    continue  # after a failure, only collect evidence (and clean up below)
+                res = bridge.run(op)
+                results.append(res.to_dict())
+                if op is Op.LIST_STUDIOS and res.ok and bridge.studio_id is None:
+                    bridge.studio_id, reason = _pick_studio(res.data, job.get("studio_name"))
+                    if bridge.studio_id is None and not job["dry_run"]:
+                        results[-1].update(status="FAIL", ok=False, error=reason)
+                        failed = True
+                        break
+                if op is Op.START_PLAYTEST and res.status not in {"UNSUPPORTED", "DRY_RUN"}:
+                    playing = True  # a start that timed out or failed may still have begun
+                if op is Op.STOP_PLAYTEST and res.ok:
+                    playing = False
+                if not res.ok and op not in DIAGNOSTIC_OPS:
+                    failed = True
+        finally:
+            # Never leave a playtest running: this also runs on exceptions and on
+            # SIGTERM (the CLI turns it into SystemExit).
+            if playing:
+                res = bridge.run(Op.STOP_PLAYTEST)
+                results.append(res.to_dict() | {"cleanup": True})
     passed = not failed and all(r["ok"] for r in results) and len(results) >= len(job["ops"])
     return {
         "job_id": job["job_id"],
@@ -165,23 +172,29 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
     }
 
 
-def _studio_count(data: object) -> int:
+def _pick_studio(data: object, name: str | None = None) -> tuple[str | None, str]:
+    """(studio id, reason if none). With `name`, only a Studio whose title contains it
+    qualifies, so an owner's ordinary place never becomes the QA target by accident."""
     studios = data.get("studios") if isinstance(data, dict) else None
-    return len(studios) if isinstance(studios, list) else 0
-
-
-def _pick_studio(data: object) -> str | None:
-    studios = data.get("studios") if isinstance(data, dict) else None
-    if not isinstance(studios, list) or len(studios) != 1:
-        return None
+    studios = studios if isinstance(studios, list) else []
+    if name is not None:
+        studios = [s for s in studios if isinstance(s, dict) and name in str(s.get("name"))]
+        if len(studios) != 1:
+            return None, (f"QA Studio {name!r} is not open" if not studios else
+                          f"{len(studios)} open Studios match {name!r}")
+    if not studios:
+        return None, ("no Roblox Studio is connected: open Studio and enable "
+                      "'Studio as MCP server'")
+    if len(studios) != 1:
+        return None, f"{len(studios)} Studios are open: pass studio_id or studio_name"
     s = studios[0]
     if isinstance(s, str):
-        return s
+        return s, ""
     if isinstance(s, dict):
         for key in ("studio_id", "studioId", "id"):
             if isinstance(s.get(key), str | int):
-                return str(s[key])
-    return None
+                return str(s[key]), ""
+    return None, "unrecognized Studio entry"
 
 
 def _write_atomic(path: Path, payload: dict) -> None:

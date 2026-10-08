@@ -12,8 +12,9 @@ A scenario is JSON data in <project>/qa/scenarios/<name>.json:
 Steps are data only. `interact` walks the character to game.Workspace.<target> and
 presses E; assertions read player attributes / ScreenGui names with constant Luau and
 are compared here in Python. While the scenario runs, a second MCP connection grabs
-frames (~2 fps) that ffmpeg stitches into a preview MP4. A failed video never fails
-the scenario.
+frames (~2 fps) with timestamps; ffmpeg holds each frame for its real interval, so the
+preview plays in real time (choppy, never sped up). A failed video never fails the
+scenario; release eligibility decides whether a video is required.
 """
 from __future__ import annotations
 
@@ -34,7 +35,8 @@ MAX_STEPS = 200
 MAX_TIMES = 50
 ASSERT_WAIT_SECONDS = 3.0
 KEY_GAP_MS = 300
-PREVIEW_FPS = 4  # frames are grabbed at ~2 fps, so previews play at ~2x speed
+OUTPUT_FPS = 10  # frames are held for their real capture interval: the preview is real-time
+SETTLE_SECONDS = 2.0  # let late errors (after the last step) reach the log before HEALTH
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 
 ATTRIBUTES_LUAU = """
@@ -126,6 +128,7 @@ class ScenarioRunner:
         shots.mkdir(parents=True, exist_ok=True)
         frames.mkdir(parents=True, exist_ok=True)
         stop = threading.Event()
+        self._frame_times: list[float] = []
         recorder = threading.Thread(target=self._record, args=(frames, stop), daemon=True)
         recorder.start()
         deadline = time.monotonic() + scenario["max_duration_seconds"]
@@ -142,15 +145,19 @@ class ScenarioRunner:
                 if status != "PASS":
                     ok = False
                     break
+            if ok:
+                time.sleep(SETTLE_SECONDS)
         finally:
             stop.set()
-            recorder.join(timeout=30)
+            recorder.join(timeout=5)  # daemon thread; never delay cleanup for video
         self._capture(shots / "final.jpg")
         video, video_error = self._stitch(frames)
         return {
             "scenario": scenario["id"], "passed": ok, "steps": steps,
             "screenshots": sorted(str(p) for p in shots.glob("*.jpg")),
             "frames": len(list(frames.glob("*.jpg"))),
+            "capture_fps": _fps(self._frame_times),
+            "video_speed": "real-time" if video else None,
             "video": str(video) if video else None, "video_error": video_error,
         }
 
@@ -236,7 +243,9 @@ class ScenarioRunner:
                     return
                 n = 0
                 while not stop.is_set():
+                    taken = time.monotonic()
                     if self._capture(frames / f"frame_{n:05d}.jpg", client):
+                        self._frame_times.append(taken)
                         n += 1
                     else:
                         time.sleep(0.25)
@@ -255,13 +264,23 @@ class ScenarioRunner:
         return False
 
     def _stitch(self, frames: Path) -> tuple[Path | None, str | None]:
-        if not list(frames.glob("frame_*.jpg")):
+        names = sorted(p.name for p in frames.glob("frame_*.jpg"))
+        times = self._frame_times[:len(names)]
+        if not names or len(times) != len(names):
             return None, "no frames captured"
+        # Concat list: each frame lasts until the next was taken (real time).
+        lines = []
+        for i, name in enumerate(names):
+            gap = times[i + 1] - times[i] if i + 1 < len(times) else 0.5
+            lines += [f"file '{name}'", f"duration {max(gap, 0.01):.3f}"]
+        lines.append(f"file '{names[-1]}'")  # concat demuxer needs the last file repeated
+        listing = frames / "frames.txt"
+        listing.write_text("\n".join(lines) + "\n")
         out = self.out_dir / "preview.mp4"
-        cmd = [FFMPEG, "-y", "-loglevel", "error", "-framerate", str(PREVIEW_FPS),
-               "-i", str(frames / "frame_%05d.jpg"),
-               "-vf", "scale=1280:-2,format=yuv420p", "-c:v", "libx264",
-               "-preset", "veryfast", "-crf", "26", "-movflags", "+faststart", str(out)]
+        cmd = [FFMPEG, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0",
+               "-i", str(listing), "-vf", f"fps={OUTPUT_FPS},scale=1280:-2,format=yuv420p",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+               "-movflags", "+faststart", str(out)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -269,3 +288,9 @@ class ScenarioRunner:
         if proc.returncode != 0:
             return None, f"ffmpeg: {proc.stderr.strip()[:500]}"
         return out, None
+
+
+def _fps(times: list[float]) -> float | None:
+    if len(times) < 2 or times[-1] <= times[0]:
+        return None
+    return round((len(times) - 1) / (times[-1] - times[0]), 2)

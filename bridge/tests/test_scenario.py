@@ -89,3 +89,28 @@ def test_scenario_job_needs_a_valid_name(game):
         parse_job({"job_id": "x", "ops": ops, "project_dir": str(game), "scenario": "../x"})
     with pytest.raises(JobError, match="without a SCENARIO op"):
         parse_job({"job_id": "x", "ops": ["LIST_STUDIOS"], "scenario": "s"})
+
+
+def test_errors_raised_during_gameplay_fail_the_capture(game, monkeypatch):
+    clean = {"ready": True, "errors": [], "players": [{"name": "p", "ready": True}]}
+    broken = clean | {"errors": ["ServerScriptService.Server:80: attempt to compare nil"]}
+    factory = fake(monkeypatch, attributes={"Carried": 1}, health_seq=[clean, broken])
+    name = scenario(game, [{"interact": {"target": "Sell"}}])
+    report = run_job(capture_job(game, name), factory)
+    health = [r for r in report["results"] if r["op"] == "HEALTH"]
+    assert [h["status"] for h in health] == ["PASS", "FAIL"]  # second check, after gameplay
+    assert "attempt to compare nil" in health[1]["error"]
+    assert report["status"] == "FAIL"
+
+
+def test_preview_is_real_time_not_sped_up(game, monkeypatch):
+    factory = fake(monkeypatch, attributes={})
+    name = scenario(game, [{"wait": 2}])
+    report = run_job(capture_job(game, name), factory)
+    data = next(r["data"] for r in report["results"] if r["op"] == "SCENARIO")
+    assert data["video_speed"] == "real-time"
+    import subprocess
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                          "-of", "csv=p=0", data["video"]], capture_output=True, text=True)
+    # ~2 s of scenario + 2 s settle: a sped-up preview would be about half that.
+    assert float(out.stdout) >= 3.0

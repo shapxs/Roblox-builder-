@@ -234,7 +234,11 @@ class Bridge:
         return OpResult(Op.SCENARIO, "PASS", data=report)
 
     def _health(self, tools: dict[str, Tool]) -> OpResult:
-        """PASS only if every player reaches ForgeReady and nothing logged an error."""
+        """PASS only on well-formed evidence: every player ForgeReady, no errors logged.
+
+        A response that does not match the expected shape is a FAIL, never a pass:
+        transport success is not validation success.
+        """
         luau = tools.get("execute_luau")
         if luau is None:
             return OpResult(Op.HEALTH, "UNSUPPORTED", error="Studio does not offer execute_luau")
@@ -242,21 +246,28 @@ class Bridge:
         while True:
             server = self._call(Op.HEALTH, luau, {"code": HEALTH_SERVER_LUAU.strip(),
                                                   "datamodel_type": "Server"})
-            if server.status != "PASS" or not isinstance(server.data, dict):
+            if server.status != "PASS":
                 return server
-            if (server.data.get("ready") or server.data.get("errors")
-                    or time.monotonic() >= deadline):
+            problem = server_health_problem(server.data)
+            if problem:
+                return OpResult(Op.HEALTH, "FAIL", tool=luau.name, data={"server": server.data},
+                                error=f"malformed server health response: {problem}")
+            if server.data["ready"] or server.data["errors"] or time.monotonic() >= deadline:
                 break
             time.sleep(READY_POLL_SECONDS)
         client = self._call(Op.HEALTH, luau, {"code": HEALTH_CLIENT_LUAU.strip(),
                                               "datamodel_type": "Client"})
-        client_data = client.data if isinstance(client.data, dict) else {"raw": client.data}
-        data = {"server": server.data, "client": client_data}
-        problems = [f"server: {e}" for e in server.data.get("errors") or []]
-        problems += [f"client: {e}" for e in client_data.get("errors") or []]
+        data = {"server": server.data, "client": client.data}
+        problems = [f"server: {e}" for e in server.data["errors"]]
         if client.status != "PASS":
             problems.append(f"client check failed: {client.error}")
-        if not server.data.get("ready"):
+        elif problem := client_health_problem(client.data):
+            problems.append(f"malformed client health response: {problem}")
+        else:
+            problems += [f"client: {e}" for e in client.data["errors"]]
+        if not server.data["players"]:
+            problems.append("no players joined the server")
+        elif not server.data["ready"]:
             problems.append("players never reached ForgeReady" if problems else
                             f"players not ForgeReady within {HEALTH_TIMEOUT_SECONDS:.0f}s")
         if problems:
@@ -274,6 +285,39 @@ class Bridge:
         status = "FAIL" if raw.get("isError") else "PASS"
         return OpResult(op, status, tool=tool.name, data=data,
                         error=_text(data) if status == "FAIL" else None)
+
+
+def _str_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def server_health_problem(data: object) -> str | None:
+    """None if `data` is a well-formed server health report, else what is wrong."""
+    if not isinstance(data, dict):
+        return f"expected an object, got {type(data).__name__}"
+    if not isinstance(data.get("ready"), bool):
+        return "'ready' must be a boolean"
+    if not _str_list(data.get("errors")):
+        return "'errors' must be a list of strings"
+    players = data.get("players")
+    # Luau's JSONEncode turns an empty table into [] and a keyed one into {}.
+    if not isinstance(players, list) or not all(
+            isinstance(p, dict) and isinstance(p.get("name"), str)
+            and isinstance(p.get("ready"), bool) for p in players):
+        return "'players' must be a list of {name, ready}"
+    if data["ready"] and not players:
+        return "'ready' is true with no players"
+    return None
+
+
+def client_health_problem(data: object) -> str | None:
+    if not isinstance(data, dict):
+        return f"expected an object, got {type(data).__name__}"
+    if not _str_list(data.get("errors")):
+        return "'errors' must be a list of strings"
+    if not _str_list(data.get("screens")):
+        return "'screens' must be a list of strings"
+    return None
 
 
 def _as_int(data: object) -> int:

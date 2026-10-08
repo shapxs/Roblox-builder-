@@ -212,3 +212,51 @@ def test_sync_payload_cannot_escape_the_long_string():
         "name": "m", "className": "ModuleScript", "children": [],
         "source": "return ']]' .. ']=]' .. ']==]'"}}]})
     assert "JSONDecode([===[" in code and code.count("]===]") == 1
+
+
+OK_SERVER = {"ready": True, "errors": [], "players": [{"name": "p", "ready": True}]}
+
+
+@pytest.mark.parametrize("health, client, match", [
+    ("not-json", None, "malformed server health response"),
+    ({"ready": "yes", "errors": [], "players": []}, None, "'ready' must be a boolean"),
+    ({"ready": True, "errors": [], "players": []}, None, "'ready' is true with no players"),
+    ({"ready": True, "errors": "none", "players": []}, None, "'errors' must be a list"),
+    (OK_SERVER, "not-json", "malformed client health response"),
+    (OK_SERVER, {"errors": []}, "'screens' must be a list"),
+])
+def test_malformed_health_evidence_fails(fake, game, health, client, match):
+    cfg = {"health": health} | ({"client": client} if client is not None else {})
+    factory = fake(tools=STUDIO_TOOLS, studios=["s"], **cfg)
+    report = run_job(core(game), factory)
+    step = next(r for r in report["results"] if r["op"] == "HEALTH")
+    assert report["status"] == "FAIL" and step["status"] == "FAIL"
+    assert match in step["error"]
+
+
+def test_studio_name_selects_the_qa_place_and_never_falls_back(fake, game):
+    studios = [{"id": "own", "name": "My Real Game (placeId: 1)"},
+               {"id": "qa", "name": "ForgeQA (placeId: 0)"}]
+    factory = fake(tools=STUDIO_TOOLS, studios=studios)
+    report = run_job(core(game, studio_name="ForgeQA"), factory)
+    assert report["status"] == "PASS" and report["studio_id"] == "qa"
+    lonely = fake(tools=STUDIO_TOOLS, studios=[studios[0]])
+    report = run_job(core(game, studio_name="ForgeQA"), lonely)
+    assert report["status"] == "FAIL"
+    assert "QA Studio 'ForgeQA' is not open" in report["results"][0]["error"]
+
+
+def test_cleanup_stops_play_even_when_an_op_crashes(fake, game, monkeypatch):
+    factory = fake(tools=STUDIO_TOOLS, studios=["s"])
+    real_run = Bridge.run
+
+    def crashing(self, op):
+        if op is Op.HEALTH:
+            raise RuntimeError("bridge bug")
+        return real_run(self, op)
+
+    monkeypatch.setattr(Bridge, "run", crashing)
+    with pytest.raises(RuntimeError, match="bridge bug"):
+        run_job(core(game), factory)
+    assert fake.calls()[-1] == {"name": "start_stop_play",
+                                "arguments": {"is_start": False, "studio_id": "s"}}
