@@ -16,6 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from roblox_bridge.mcp_client import McpClient, McpError, Tool
+from roblox_bridge.scenario import ScenarioError, ScenarioRunner, load_scenario
 from roblox_bridge.sync import SyncError, build_payload, sync_code
 
 
@@ -30,6 +31,7 @@ class Op(StrEnum):
     STOP_PLAYTEST = "STOP_PLAYTEST"
     SYNC = "SYNC"
     HEALTH = "HEALTH"
+    SCENARIO = "SCENARIO"
 
 
 READY_LUAU = 'return #game:GetService("Players"):GetPlayers()'
@@ -130,6 +132,9 @@ class Bridge:
     dry_run: bool = False
     timeout: float = 60.0
     project_dir: Path | None = None
+    scenario: str | None = None
+    capture_dir: Path | None = None
+    client_factory: object = McpClient  # second connection for frame capture
     _tools: dict[str, Tool] = field(default_factory=dict)
 
     def tools(self, refresh: bool = False) -> dict[str, Tool]:
@@ -165,6 +170,8 @@ class Bridge:
             return self._sync(tools)
         if op is Op.HEALTH:
             return self._health(tools)
+        if op is Op.SCENARIO:
+            return self._scenario(tools)
         if op is Op.LIST_TOOLS:
             data = {n: sorted(t.params) for n, t in sorted(tools.items())}
             return OpResult(op, "PASS", data=data)
@@ -200,6 +207,31 @@ class Bridge:
             return OpResult(Op.SYNC, "UNSUPPORTED", error="Studio does not offer execute_luau")
         return self._call(Op.SYNC, tools["execute_luau"],
                           {"code": code, "datamodel_type": "Edit"})
+
+    def _scenario(self, tools: dict[str, Tool]) -> OpResult:
+        if self.project_dir is None or self.scenario is None or self.capture_dir is None:
+            return OpResult(Op.SCENARIO, "ERROR",
+                            error="SCENARIO needs project_dir, scenario and capture_dir")
+        needed = {"character_navigation", "user_keyboard_input", "execute_luau",
+                  "screen_capture"}
+        if not needed <= set(tools):
+            return OpResult(Op.SCENARIO, "UNSUPPORTED",
+                            error=f"Studio lacks {sorted(needed - set(tools))}")
+        try:
+            scenario = load_scenario(self.project_dir, self.scenario)
+        except ScenarioError as exc:
+            return OpResult(Op.SCENARIO, "ERROR", error=str(exc))
+        if self.dry_run:
+            return OpResult(Op.SCENARIO, "DRY_RUN", data={"steps": len(scenario["steps"])})
+        runner = ScenarioRunner(self.client, self.studio_id or "", self.capture_dir,
+                                client_factory=self.client_factory)
+        report = runner.run(scenario)
+        failed = next((s for s in report["steps"] if s["status"] != "PASS"), None)
+        if failed:
+            return OpResult(Op.SCENARIO, "FAIL", data=report,
+                            error=f"step {failed['step']} {json.dumps(failed.get('action'))}: "
+                                  f"{json.dumps(failed['detail'])[:1000]}")
+        return OpResult(Op.SCENARIO, "PASS", data=report)
 
     def _health(self, tools: dict[str, Tool]) -> OpResult:
         """PASS only if every player reaches ForgeReady and nothing logged an error."""

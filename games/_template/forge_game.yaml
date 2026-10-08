@@ -9,4 +9,4 @@ roblox:
   place_id: null
 gates:
   static: [format, lint, typecheck, unit, build]
-  studio_scenarios: [qa/scenarios/core_loop.yaml]
+  studio_scenarios: [qa/scenarios/core_loop.json]

@@ -15,9 +15,13 @@ from pathlib import Path
 
 from roblox_bridge.mcp_client import McpClient, McpError
 from roblox_bridge.ops import Bridge, Op
+from roblox_bridge.scenario import NAME as SCENARIO_NAME
 
 JOB_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-ALLOWED_KEYS = {"job_id", "ops", "studio_id", "dry_run", "timeout_seconds", "project_dir"}
+ALLOWED_KEYS = {"job_id", "ops", "studio_id", "dry_run", "timeout_seconds", "project_dir",
+                "scenario"}
+# Screenshots and preview video land in <capture root>/<job_id>-<timestamp>/.
+DEFAULT_CAPTURE_ROOT = "~/Roblox Games/artifacts/captures"
 # SYNC may only read projects under these roots (colon-separated override in env).
 DEFAULT_PROJECT_ROOTS = ["~/Roblox Games/games", "~/Voya/AutoDevFactory/worktrees"]
 MAX_OPS = 20
@@ -33,7 +37,15 @@ CHECKS: dict[str, list[Op]] = {
     "at002": AT002_OPS,
     "core": [Op.LIST_STUDIOS, Op.SYNC, Op.START_PLAYTEST, Op.HEALTH, Op.GET_LOGS,
              Op.STOP_PLAYTEST],
+    # `capture`: core plus a scripted scenario recorded to screenshots and a preview MP4.
+    "capture": [Op.LIST_STUDIOS, Op.SYNC, Op.START_PLAYTEST, Op.HEALTH, Op.SCENARIO,
+                Op.GET_LOGS, Op.STOP_PLAYTEST],
 }
+
+
+def capture_root() -> Path:
+    raw = os.environ.get("ROBLOX_BRIDGE_CAPTURE_ROOT", DEFAULT_CAPTURE_ROOT)
+    return Path(raw).expanduser().resolve()
 
 
 def project_roots() -> list[Path]:
@@ -84,9 +96,17 @@ def parse_job(raw: dict) -> dict:
     project_dir = _project_dir(raw.get("project_dir"))
     if Op.SYNC in parsed_ops and project_dir is None:
         raise JobError("SYNC requires project_dir")
+    scenario = raw.get("scenario")
+    if Op.SCENARIO in parsed_ops:
+        if project_dir is None or not isinstance(scenario, str) or not SCENARIO_NAME.match(
+                scenario):
+            raise JobError("SCENARIO requires project_dir and a scenario name")
+    elif scenario is not None:
+        raise JobError("scenario given without a SCENARIO op")
     return {
         "job_id": job_id,
         "project_dir": project_dir,
+        "scenario": scenario,
         "ops": parsed_ops,
         "studio_id": studio_id,
         "dry_run": bool(raw.get("dry_run", False)),
@@ -96,10 +116,15 @@ def parse_job(raw: dict) -> dict:
 
 def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> dict:
     started = datetime.now(UTC).isoformat()
+    capture_dir = None
+    if Op.SCENARIO in job["ops"]:
+        capture_dir = capture_root() / f"{job['job_id']}-{datetime.now():%Y%m%d-%H%M%S}"
     results = []
     with client_factory() as client:
         bridge = Bridge(client, studio_id=job["studio_id"], dry_run=job["dry_run"],
-                        timeout=job["timeout_seconds"], project_dir=job.get("project_dir"))
+                        timeout=job["timeout_seconds"], project_dir=job.get("project_dir"),
+                        scenario=job.get("scenario"), capture_dir=capture_dir,
+                        client_factory=client_factory)
         playing = False
         failed = False
         for op in job["ops"]:
@@ -133,6 +158,7 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
         "status": "PASS" if passed else "FAIL",
         "studio_id": bridge.studio_id,
         "project_dir": str(job["project_dir"]) if job.get("project_dir") else None,
+        "capture_dir": str(capture_dir) if capture_dir else None,
         "started_at": started,
         "finished_at": datetime.now(UTC).isoformat(),
         "results": results,

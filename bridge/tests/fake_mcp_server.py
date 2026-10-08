@@ -6,6 +6,7 @@
   hang:    [tool names]                   tools that never answer
   players: int                            readiness-poll answer (default 1)
   health / client: dict                   HEALTH server / client answers
+  attributes / screens                    scenario assertion answers
   log:     path                           append every tools/call as a JSON line
 """
 import json
@@ -13,6 +14,7 @@ import os
 import sys
 
 cfg = json.loads(os.environ.get("FAKE_MCP", "{}"))
+TINY_JPEG = "/9j/4AAQSkZJRgABAgAAAQABAAD//gAPTGF2YzYzLjEuMTAyAP/bAEMACAQEBAQEBQUFBQUFBgYGBgYGBgYGBgYGBgcHBwgICAcHBwYGBwcICAgICQkJCAgICAkJCgoKDAwLCw4ODhERFP/EAEwAAQEAAAAAAAAAAAAAAAAAAAAGAQEBAAAAAAAAAAAAAAAAAAAABhABAAAAAAAAAAAAAAAAAAAAABEBAAAAAAAAAAAAAAAAAAAAAP/AABEIACQAQAMBIgACEQADEQD/2gAMAwEAAhEDEQA/AIsBKIkAAAAAAAAAAAAAAAAAAAAAB//Z"
 # Like the real proxy, list_roblox_studios is callable but never advertised.
 tools = cfg.get("tools", [])
 
@@ -51,7 +53,16 @@ for line in sys.stdin:
         elif name == "execute_luau" and "ForgeReady" in args.get("code", ""):
             text = json.dumps(cfg.get("health", {"ready": True, "players": [], "errors": []}))
         elif name == "execute_luau" and "PlayerGui" in args.get("code", ""):
-            text = json.dumps(cfg.get("client", {"errors": [], "screens": ["MainHUD"]}))
+            if "g.Enabled" in args.get("code", ""):  # scenario ui_visible check
+                text = json.dumps(cfg.get("screens", ["MainHUD"]))
+            else:
+                text = json.dumps(cfg.get("client", {"errors": [], "screens": ["MainHUD"]}))
+        elif name == "execute_luau" and "GetAttributes() or {}" in args.get("code", ""):
+            text = json.dumps(cfg.get("attributes", {}))
+        elif name == "screen_capture":
+            reply(rid, {"content": [{"type": "image", "mimeType": "image/jpeg",
+                                     "data": TINY_JPEG}], "isError": False})
+            continue
         else:
             text = json.dumps({"tool": name, "ok": True})
         reply(rid, {"content": [{"type": "text", "text": text}],

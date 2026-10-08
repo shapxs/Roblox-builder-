@@ -1,0 +1,78 @@
+{
+  "id": "core_loop",
+  "max_duration_seconds": 120,
+  "steps": [
+    {
+      "assert": {
+        "ui_visible": "MainHUD"
+      }
+    },
+    {
+      "capture": "spawn"
+    },
+    {
+      "interact": {
+        "target": "Collect",
+        "times": 5
+      }
+    },
+    {
+      "assert": {
+        "attribute": {
+          "Carried": 5
+        }
+      }
+    },
+    {
+      "capture": "collected"
+    },
+    {
+      "interact": {
+        "target": "Sell"
+      }
+    },
+    {
+      "assert": {
+        "attribute": {
+          "Cash": 5,
+          "Carried": 0
+        }
+      }
+    },
+    {
+      "interact": {
+        "target": "Collect",
+        "times": 10
+      }
+    },
+    {
+      "interact": {
+        "target": "Sell"
+      }
+    },
+    {
+      "assert": {
+        "attribute": {
+          "Cash": 15
+        }
+      }
+    },
+    {
+      "interact": {
+        "target": "Upgrade"
+      }
+    },
+    {
+      "assert": {
+        "attribute": {
+          "Level": 2,
+          "Cash": 5,
+          "Capacity": 20
+        }
+      }
+    },
+    {
+      "capture": "upgraded"
+    }
+  ]
+}

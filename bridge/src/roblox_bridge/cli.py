@@ -3,7 +3,7 @@
   roblox-bridge tools                   list Studio MCP tools and their parameters
   roblox-bridge op <OP> [--studio ID]   run one whitelisted op
   roblox-bridge at002 [--dry-run]       run the AT-002 acceptance sequence
-  roblox-bridge check <name> --project DIR   run a named check (core, at002)
+  roblox-bridge check <name> --project DIR   run a named check (core, capture, at002)
   roblox-bridge serve <queue-dir>       process <dir>/jobs/*.json forever
 """
 from __future__ import annotations
@@ -32,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     p_check = sub.add_parser("check")
     p_check.add_argument("name", choices=sorted(CHECKS))
     p_check.add_argument("--project")
+    p_check.add_argument("--scenario", default="core_loop")
     p_check.add_argument("--studio")
     p_check.add_argument("--dry-run", action="store_true")
     p_check.add_argument("--out", type=Path)
@@ -56,7 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     name = "at002" if args.cmd == "at002" else args.name
     job = parse_job({"job_id": name, "ops": [o.value for o in CHECKS[name]],
                      "studio_id": args.studio, "dry_run": args.dry_run,
-                     "project_dir": getattr(args, "project", None)})
+                     "project_dir": getattr(args, "project", None),
+                     **({"scenario": args.scenario} if name == "capture" else {})})
     report = run_job(job)
     text = json.dumps(report, indent=2, default=str)
     if args.out:
