@@ -1,90 +1,87 @@
 --!strict
--- Persistence abstraction. Uses DataStoreService in live servers and in-memory storage
--- in Studio or whenever DataStores are unavailable, so playtests never crash on saves.
+-- Player progress persistence on top of SessionStore.
+--
+-- Live servers use DataStoreService; Studio playtests use an in-memory store with the
+-- same session rules, so playtests exercise the same code path without touching real
+-- player data. A player whose profile cannot be loaded safely is asked to rejoin
+-- rather than playing on defaults that could later overwrite real progress.
 
 local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 
 local Economy = require(game:GetService("ReplicatedStorage").Shared.Economy)
+local SessionStore = require(script.Parent.SessionStore)
 
-local STORE_NAME = "PlayerData_v1"
-local MAX_ATTEMPTS = 3
+local STORE_NAME = "PlayerData_v2"
+local LOAD_ATTEMPTS = 4
+local LOCKED_RETRY_SECONDS = 3
+local SAVE_ATTEMPTS = 3
 
 local PlayerData = {}
 
-local store: DataStore? = nil
-local memory: { [string]: any } = {}
+local sessionId = if game.JobId ~= "" then game.JobId else HttpService:GenerateGUID(false)
 
--- Studio playtests never touch real player data: they use memory.
-if not RunService:IsStudio() then
-	local ok, result = pcall(function()
+local function openStore(): any
+	if RunService:IsStudio() then
+		return SessionStore.MemoryStore.new()
+	end
+	local ok, store = pcall(function()
 		return DataStoreService:GetDataStore(STORE_NAME)
 	end)
 	if ok then
-		store = result
-	else
-		warn("[PlayerData] DataStore unavailable, using memory:", result)
+		return store
 	end
+	warn("[PlayerData] DataStore unavailable:", store)
+	return nil
 end
 
--- Studio without "Enable Studio Access to API Services" rejects every call; retrying
--- cannot help, so switch to memory for the rest of the session.
-local function isPermanent(err: any): boolean
-	return string.find(tostring(err), "not allowed", 1, true) ~= nil
+local backing = openStore()
+local sessions = if backing then SessionStore.new(backing, sessionId, os.time) else nil
+
+local function key(userId: number): string
+	return "player_" .. tostring(userId)
 end
 
-local function withRetry<T>(label: string, fn: () -> T): (boolean, T?)
-	for attempt = 1, MAX_ATTEMPTS do
-		local ok, result = pcall(fn)
-		if ok then
-			return true, result
+-- Returns the player's state, or nil if it could not be loaded safely.
+function PlayerData.load(userId: number): Economy.State?
+	if sessions == nil then
+		return nil
+	end
+	for attempt = 1, LOAD_ATTEMPTS do
+		local result, data = sessions:load(key(userId))
+		if result == "loaded" then
+			return Economy.sanitize(data)
+		elseif result == "new" then
+			return Economy.newState()
+		elseif result == "corrupt" then
+			warn("[PlayerData] unreadable profile for", userId)
+			return nil
 		end
-		if isPermanent(result) then
-			warn("[PlayerData] DataStore not allowed here, using memory")
-			store = nil
-			return false, nil
-		end
-		warn(
-			string.format(
-				"[PlayerData] %s failed (attempt %d): %s",
-				label,
-				attempt,
-				tostring(result)
-			)
-		)
-		task.wait(2 ^ attempt)
+		-- "locked": another server is still saving; "failed": transient error.
+		warn(string.format("[PlayerData] load %s (attempt %d)", result, attempt))
+		task.wait(if result == "locked" then LOCKED_RETRY_SECONDS else 2 ^ attempt)
 	end
-	return false, nil
+	return nil
 end
 
-function PlayerData.load(userId: number): Economy.State
-	local key = tostring(userId)
-	local activeStore = store
-	if activeStore == nil then
-		return Economy.sanitize(memory[key])
+function PlayerData.save(userId: number, state: Economy.State, release: boolean): boolean
+	if sessions == nil then
+		return false
 	end
-	local ok, raw = withRetry("load", function()
-		return activeStore:GetAsync(key)
-	end)
-	if not ok then
-		return Economy.sanitize(if store == nil then memory[key] else nil)
-	end
-	return Economy.sanitize(raw)
-end
-
-function PlayerData.save(userId: number, state: Economy.State): boolean
-	local key = tostring(userId)
 	local snapshot = { cash = state.cash, carried = state.carried, level = state.level }
-	local activeStore = store
-	if activeStore == nil then
-		memory[key] = snapshot
-		return true
+	for attempt = 1, SAVE_ATTEMPTS do
+		local result = sessions:save(key(userId), snapshot, release)
+		if result == "saved" then
+			return true
+		elseif result == "lost_session" then
+			warn("[PlayerData] another server owns this profile; not saving", userId)
+			return false
+		end
+		warn(string.format("[PlayerData] save failed (attempt %d)", attempt))
+		task.wait(attempt)
 	end
-	local ok = withRetry("save", function()
-		activeStore:SetAsync(key, snapshot)
-		return true
-	end)
-	return ok
+	return false
 end
 
 return PlayerData

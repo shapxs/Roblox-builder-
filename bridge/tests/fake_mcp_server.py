@@ -7,11 +7,13 @@
   players: int                            readiness-poll answer (default 1)
   health / client: dict                   HEALTH server / client answers
   health_seq: [dict|str]                  successive HEALTH server answers
+  sync_lies: bool                         SYNC echoes a wrong source identity
   attributes / screens                    scenario assertion answers
   log:     path                           append every tools/call as a JSON line
 """
 import json
 import os
+import re
 import sys
 
 cfg = json.loads(os.environ.get("FAKE_MCP", "{}"))
@@ -52,6 +54,11 @@ for line in sys.stdin:
             text = json.dumps({"studios": cfg.get("studios", [])})
         elif name == "execute_luau" and args.get("code", "").startswith("return #game"):
             text = str(cfg.get("players", 1))  # playtest readiness poll
+        elif name == "execute_luau" and "ForgeManaged" in args.get("code", ""):
+            # SYNC: echo the source identity, unless told to lie.
+            m = re.search(r'"source_sha256": "([0-9a-f]{64})"', args["code"])
+            echoed = "0" * 64 if cfg.get("sync_lies") else (m.group(1) if m else None)
+            text = json.dumps({"mounts": 1, "removed": 0, "source_sha256": echoed})
         elif name == "execute_luau" and "ForgeReady" in args.get("code", ""):
             seq = cfg.get("health_seq")  # successive answers, last one repeats
             if seq:

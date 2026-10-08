@@ -5,6 +5,7 @@
   roblox-bridge at002 [--dry-run]       run the AT-002 acceptance sequence
   roblox-bridge check <name> --project DIR   run a named check (core, capture, at002)
   roblox-bridge recover --studio-name N stop any playtest and confirm Edit mode
+  roblox-bridge source-hash --project D identity of exactly what SYNC would load
   roblox-bridge serve <queue-dir>       process <dir>/jobs/*.json forever
 """
 from __future__ import annotations
@@ -51,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--studio-name", help="require the Studio whose title contains this")
     p_check.add_argument("--dry-run", action="store_true")
     p_check.add_argument("--out", type=Path)
+    p_hash = sub.add_parser("source-hash")
+    p_hash.add_argument("--project", required=True)
     p_rec = sub.add_parser("recover")
     p_rec.add_argument("--studio-name")
     p_serve = sub.add_parser("serve")
@@ -59,6 +62,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         serve(args.root)
+        return 0
+    if args.cmd == "source-hash":
+        from roblox_bridge.sync import SyncError, build_payload
+
+        try:
+            payload = build_payload(Path(args.project))
+        except (SyncError, OSError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+        print(json.dumps({"source_sha256": payload["source_sha256"],
+                          "mounts": len(payload["mounts"])}))
         return 0
     if args.cmd == "recover":
         return recover(args.studio_name)

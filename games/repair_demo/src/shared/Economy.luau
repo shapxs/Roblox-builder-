@@ -14,7 +14,9 @@ Economy.Config = table.freeze({
 	baseCapacity = 10,
 	capacityPerLevel = 10,
 	baseUpgradeCost = 10,
-	upgradeCostGrowth = 2,
+	-- x1.35 per level keeps every level within ~12 full-bag trips (see pacing test);
+	-- doubling made level 20 cost 2.6 million collections.
+	upgradeCostGrowth = 1.35,
 	maxLevel = 20,
 })
 
@@ -27,7 +29,15 @@ function Economy.capacity(level: number): number
 end
 
 function Economy.upgradeCost(level: number): number
-	return Economy.Config.baseUpgradeCost * Economy.Config.upgradeCostGrowth ^ (level - 1)
+	return math.floor(
+		Economy.Config.baseUpgradeCost * Economy.Config.upgradeCostGrowth ^ (level - 1)
+	)
+end
+
+-- Full-bag trips needed to afford the next upgrade (pacing metric).
+function Economy.tripsToUpgrade(level: number): number
+	local perTrip = Economy.capacity(level) * Economy.Config.resourceValue
+	return math.ceil(Economy.upgradeCost(level) / perTrip)
 end
 
 function Economy.collect(state: State): (boolean, string?)

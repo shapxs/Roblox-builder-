@@ -260,3 +260,52 @@ def test_cleanup_stops_play_even_when_an_op_crashes(fake, game, monkeypatch):
         run_job(core(game), factory)
     assert fake.calls()[-1] == {"name": "start_stop_play",
                                 "arguments": {"is_start": False, "studio_id": "s"}}
+
+
+def test_sync_rejects_what_it_cannot_reproduce(game):
+    from roblox_bridge.sync import SyncError, build_payload
+
+    (game / "src" / "server" / "init.meta.json").write_text('{"properties": {"Disabled": true}}')
+    with pytest.raises(SyncError, match=".meta.json"):
+        build_payload(game)
+    (game / "src" / "server" / "init.meta.json").unlink()
+    project = json.loads((game / "default.project.json").read_text())
+    project["tree"]["Workspace"] = {"$properties": {"Gravity": 0}}
+    (game / "default.project.json").write_text(json.dumps(project))
+    with pytest.raises(SyncError, match=r"\$properties"):
+        build_payload(game)
+
+
+def test_sync_rejects_symlinks(game, tmp_path):
+    from roblox_bridge.sync import SyncError, build_payload
+
+    (tmp_path / "outside.luau").write_text("return 1")
+    (game / "src" / "shared" / "Leak.luau").symlink_to(tmp_path / "outside.luau")
+    with pytest.raises(SyncError, match="symlinks"):
+        build_payload(game)
+
+
+def test_source_identity_tracks_exactly_what_is_synced(game):
+    from roblox_bridge.sync import build_payload
+
+    first = build_payload(game)["source_sha256"]
+    assert build_payload(game)["source_sha256"] == first  # deterministic
+    economy = game / "src" / "shared" / "Economy.luau"
+    economy.write_text(economy.read_text() + "\n-- changed\n")
+    assert build_payload(game)["source_sha256"] != first
+
+
+def test_sync_fails_when_studio_does_not_confirm_the_source(fake, game):
+    factory = fake(tools=STUDIO_TOOLS, studios=["s"], sync_lies=True)
+    report = run_job(core(game), factory)
+    sync = next(r for r in report["results"] if r["op"] == "SYNC")
+    assert sync["status"] == "FAIL" and "source identity" in sync["error"]
+    assert report["status"] == "FAIL"
+
+
+def test_tampered_rojo_binary_is_refused(game, monkeypatch):
+    from roblox_bridge import sync
+
+    monkeypatch.setattr(sync, "ROJO_SHA256", "0" * 64)
+    with pytest.raises(sync.SyncError, match="unexpected sha256"):
+        sync.build_payload(game)

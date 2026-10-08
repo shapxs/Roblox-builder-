@@ -10,6 +10,8 @@ local Economy = require(ReplicatedStorage.Shared.Economy)
 local PlayerData = require(script.PlayerData)
 
 local ACTION_COOLDOWN = 0.2
+local AUTOSAVE_SECONDS = 60
+local SHUTDOWN_SAVE_SECONDS = 25
 
 local states: { [Player]: Economy.State } = {}
 local lastAction: { [Player]: number } = {}
@@ -121,6 +123,15 @@ local function onPlayerAdded(player: Player)
 	leaderstats.Parent = player
 
 	local state = PlayerData.load(player.UserId)
+	if state == nil then
+		-- Never play on defaults: a later save could overwrite real progress.
+		player:Kick("We couldn't load your progress safely. Please rejoin in a minute.")
+		return
+	end
+	if player.Parent == nil then
+		PlayerData.save(player.UserId, state, true) -- left while loading: release the lock
+		return
+	end
 	states[player] = state
 	publish(player, state)
 	-- Contract with Forge's Studio health check: this player is fully loaded.
@@ -129,11 +140,11 @@ end
 
 local function onPlayerRemoving(player: Player)
 	local state = states[player]
-	if state then
-		PlayerData.save(player.UserId, state)
-	end
 	states[player] = nil
 	lastAction[player] = nil
+	if state then
+		PlayerData.save(player.UserId, state, true)
+	end
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
@@ -142,8 +153,28 @@ for _, player in Players:GetPlayers() do
 	task.spawn(onPlayerAdded, player)
 end
 
+-- Autosave so a crash loses at most one interval of progress.
+task.spawn(function()
+	while true do
+		task.wait(AUTOSAVE_SECONDS)
+		for player, state in states do
+			task.spawn(PlayerData.save, player.UserId, state, false)
+		end
+	end
+end)
+
 game:BindToClose(function()
+	-- Roblox allows ~30 s; save in parallel and stop waiting before the deadline.
+	local pending = 0
 	for player, state in states do
-		PlayerData.save(player.UserId, state)
+		pending += 1
+		task.spawn(function()
+			PlayerData.save(player.UserId, state, true)
+			pending -= 1
+		end)
+	end
+	local deadline = os.clock() + SHUTDOWN_SAVE_SECONDS
+	while pending > 0 and os.clock() < deadline do
+		task.wait(0.25)
 	end
 end)

@@ -200,13 +200,20 @@ class Bridge:
         if self.project_dir is None:
             return OpResult(Op.SYNC, "ERROR", error="SYNC needs a project_dir")
         try:
-            code = sync_code(build_payload(self.project_dir))
+            payload = build_payload(self.project_dir)
+            code = sync_code(payload)
         except (SyncError, OSError) as exc:
             return OpResult(Op.SYNC, "ERROR", error=str(exc))
         if "execute_luau" not in tools:
             return OpResult(Op.SYNC, "UNSUPPORTED", error="Studio does not offer execute_luau")
-        return self._call(Op.SYNC, tools["execute_luau"],
-                          {"code": code, "datamodel_type": "Edit"})
+        result = self._call(Op.SYNC, tools["execute_luau"],
+                            {"code": code, "datamodel_type": "Edit"})
+        if result.status == "PASS":
+            echoed = result.data.get("source_sha256") if isinstance(result.data, dict) else None
+            if echoed != payload["source_sha256"]:
+                return OpResult(Op.SYNC, "FAIL", tool=result.tool, data=result.data,
+                                error="Studio did not confirm the synced source identity")
+        return result
 
     def _scenario(self, tools: dict[str, Tool]) -> OpResult:
         if self.project_dir is None or self.scenario is None or self.capture_dir is None:

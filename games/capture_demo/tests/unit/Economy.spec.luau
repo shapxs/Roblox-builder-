@@ -59,4 +59,13 @@ tests["sanitize repairs tampered saves"] = function()
 	eq(Economy.sanitize("garbage").level, 1, "non-table")
 end
 
+tests["every level is reachable in a bounded number of full-bag trips"] = function()
+	eq(Economy.tripsToUpgrade(1), 1, "first upgrade after one full bag")
+	for level = 1, Economy.Config.maxLevel - 1 do
+		if Economy.tripsToUpgrade(level) > 15 then
+			error(string.format("level %d needs %d trips", level, Economy.tripsToUpgrade(level)))
+		end
+	end
+end
+
 return tests

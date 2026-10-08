@@ -3,6 +3,7 @@ local process = require("@lune/process")
 
 local suites = {
 	Economy = require("./unit/Economy.spec"),
+	SessionStore = require("./unit/SessionStore.spec"),
 }
 
 local passed, failed = 0, 0
