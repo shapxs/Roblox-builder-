@@ -60,3 +60,18 @@ platform today.
   a one-time manual step in Studio (or keep a pool of pre-created private experiences).
 - Game feel, art quality, and whether a game finds players can't be gated
   deterministically. Visual-model scores and your Telegram review cover them.
+
+## Milestones reached (2026-10-08)
+
+- **AT-002 (Studio control): PASS live.** Bridge finds Studio, inspects, starts a
+  playtest, reads server state and logs, stops. Also passes through Forge's
+  `roblox-studio` gate.
+- **AT-003 (repair loop): PASS live.** `scripts/roblox_repair_e2e.py` on branch
+  `feature/roblox-studio-domain`; evidence in `evidence/at003-repair-loop-2026-10-08.json`.
+  A runtime-only defect (indexing a missing leaderstats child) passed all five static gates
+  in the sandbox; the `roblox-studio core` gate failed with
+  `ServerScriptService.Server:125: attempt to index nil with 'Value'`; the builder
+  (qwen3.8-flash-next:125b-mlx) fixed it on attempt 2; the reviewer (qwen3.8:27b) rejected
+  that fix as scope creep (it invented a new bonus rule); attempt 3 made the minimal fix,
+  all gates passed, the reviewer accepted, and the controller merged. 21 minutes, audit
+  chain intact.

@@ -1,0 +1,134 @@
+{
+  "status": "COMPLETE",
+  "attempts": 3,
+  "last_error": null,
+  "elapsed_s": 1260.6,
+  "attempt_rows": [
+    {
+      "attempt_number": 1,
+      "role": "builder",
+      "model": "qwen3.8-flash-next:125b-mlx",
+      "result": "completed"
+    },
+    {
+      "attempt_number": 2,
+      "role": "builder",
+      "model": "qwen3.8-flash-next:125b-mlx",
+      "result": "completed"
+    },
+    {
+      "attempt_number": 3,
+      "role": "reviewer",
+      "model": "qwen3.8:27b",
+      "result": "repair"
+    },
+    {
+      "attempt_number": 4,
+      "role": "builder",
+      "model": "qwen3.8-flash-next:125b-mlx",
+      "result": "completed"
+    },
+    {
+      "attempt_number": 5,
+      "role": "reviewer",
+      "model": "qwen3.8:27b",
+      "result": "accept"
+    }
+  ],
+  "gates": [
+    {
+      "gate_name": "format",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "lint",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "typecheck",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "unit",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "build",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "studio",
+      "status": "FAIL",
+      "exit_code": 1
+    },
+    {
+      "gate_name": "format",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "lint",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "typecheck",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "unit",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "build",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "studio",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "format",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "lint",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "typecheck",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "unit",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "build",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "gate_name": "studio",
+      "status": "PASS",
+      "exit_code": 0
+    }
+  ],
+  "audit_chain_intact": true,
+  "git_log": "aa4d17b factory(RBX01): HUD label says CASH\n289dea9 baseline: repair_demo (planted runtime defect)",
+  "merged_diff": "diff --git a/src/client/init.client.luau b/src/client/init.client.luau\nindex 38bdf28..c97a692 100644\n--- a/src/client/init.client.luau\n+++ b/src/client/init.client.luau\n@@ -31,7 +31,7 @@ local function render()\n \tlocal carried = player:GetAttribute(\"Carried\") or 0\n \tlocal capacity = player:GetAttribute(\"Capacity\") or 0\n \tlocal cost = player:GetAttribute(\"UpgradeCost\") or 0\n-\tlabel.Text = string.format(\"Cash: %d   Bag: %d/%d   Upgrade: %d\", cash, carried, capacity, cost)\n+\tlabel.Text = string.format(\"CASH: %d   Bag: %d/%d   Upgrade: %d\", cash, carried, capacity, cost)\n end\n \n for _, name in { \"Cash\", \"Carried\", \"Capacity\", \"UpgradeCost\" } do\ndiff --git a/src/server/init.server.luau b/src/server/init.server.luau\nindex 6136ebf..723cc48 100644\n--- a/src/server/init.server.luau\n+++ b/src/server/init.server.luau\n@@ -118,12 +118,12 @@ local function onPlayerAdded(player: Player)\n \tlocal cash = Instance.new(\"IntValue\")\n \tcash.Name = \"Cash\"\n \tcash.Parent = leaderstats\n+\tlocal bonus = Instance.new(\"IntValue\")\n+\tbonus.Name = \"Bonus\"\n+\tbonus.Value = 10\n+\tbonus.Parent = leaderstats\n \tleaderstats.Parent = player\n \n-\t-- Welcome bonus for joining.\n-\tlocal bonus = leaderstats:FindFirstChild(\"Bonus\") :: any\n-\tbonus.Value += 10\n-\n \tlocal state = PlayerData.load(player.UserId)\n \tstates[player] = state\n \tpublish(player, state)\n",
+  "workdir": "/Users/jonathanramsey/Voya/AutoDevFactory-roblox-runs/20261008-131031"
+}
