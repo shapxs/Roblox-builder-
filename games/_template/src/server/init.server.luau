@@ -123,6 +123,8 @@ local function onPlayerAdded(player: Player)
 	local state = PlayerData.load(player.UserId)
 	states[player] = state
 	publish(player, state)
+	-- Contract with Forge's Studio health check: this player is fully loaded.
+	player:SetAttribute("ForgeReady", true)
 end
 
 local function onPlayerRemoving(player: Player)

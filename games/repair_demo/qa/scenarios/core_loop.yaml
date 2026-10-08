@@ -1,0 +1,16 @@
+id: core_loop
+players: 1
+steps:
+  - spawn
+  - assert: { ui_visible: MainHUD }
+  - interact: { prompt: Collect, times: 5 }
+  - assert: { attribute: { Carried: 5 } }
+  - interact: { prompt: Sell }
+  - assert: { attribute: { Cash: 5, Carried: 0 } }
+  - interact: { prompt: Collect, times: 10 }
+  - interact: { prompt: Sell }
+  - interact: { prompt: Upgrade }
+  - assert: { attribute: { Level: 2 } }
+success:
+  max_duration_seconds: 120
+  fatal_errors: 0

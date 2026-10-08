@@ -13,8 +13,10 @@ import json
 import time
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
+from pathlib import Path
 
 from roblox_bridge.mcp_client import McpClient, McpError, Tool
+from roblox_bridge.sync import SyncError, build_payload, sync_code
 
 
 class Op(StrEnum):
@@ -26,6 +28,8 @@ class Op(StrEnum):
     PROBE = "PROBE"
     GET_LOGS = "GET_LOGS"
     STOP_PLAYTEST = "STOP_PLAYTEST"
+    SYNC = "SYNC"
+    HEALTH = "HEALTH"
 
 
 READY_LUAU = 'return #game:GetService("Players"):GetPlayers()'
@@ -56,6 +60,39 @@ return game:GetService("HttpService"):JSONEncode({
 	players = players,
 })
 """
+
+# Game contract: the server sets player attribute ForgeReady once the player is loaded.
+HEALTH_SERVER_LUAU = """
+local Players = game:GetService("Players")
+local LogService = game:GetService("LogService")
+local players, ready = {}, #Players:GetPlayers() > 0
+for _, p in Players:GetPlayers() do
+	local r = p:GetAttribute("ForgeReady") == true
+	ready = ready and r
+	table.insert(players, { name = p.Name, ready = r, attributes = p:GetAttributes() })
+end
+local errors = {}
+for _, e in LogService:GetLogHistory() do
+	if e.messageType == Enum.MessageType.MessageError then table.insert(errors, e.message) end
+end
+return game:GetService("HttpService"):JSONEncode({ ready = ready, players = players, errors = errors })
+"""
+
+HEALTH_CLIENT_LUAU = """
+local errors = {}
+for _, e in game:GetService("LogService"):GetLogHistory() do
+	if e.messageType == Enum.MessageType.MessageError then table.insert(errors, e.message) end
+end
+local gui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+local screens = {}
+if gui then
+	for _, g in gui:GetChildren() do
+		if g:IsA("ScreenGui") then table.insert(screens, g.Name) end
+	end
+end
+return game:GetService("HttpService"):JSONEncode({ errors = errors, screens = screens })
+"""
+HEALTH_TIMEOUT_SECONDS = 30.0
 
 # op -> (tool, fixed arguments). Luau ops carry their snippet and target datamodel.
 CALLS: dict[Op, tuple[str, dict]] = {
@@ -92,6 +129,7 @@ class Bridge:
     studio_id: str | None = None
     dry_run: bool = False
     timeout: float = 60.0
+    project_dir: Path | None = None
     _tools: dict[str, Tool] = field(default_factory=dict)
 
     def tools(self, refresh: bool = False) -> dict[str, Tool]:
@@ -123,6 +161,10 @@ class Bridge:
                     return result
                 time.sleep(READY_POLL_SECONDS)
         tools = self.tools()
+        if op is Op.SYNC:
+            return self._sync(tools)
+        if op is Op.HEALTH:
+            return self._health(tools)
         if op is Op.LIST_TOOLS:
             data = {n: sorted(t.params) for n, t in sorted(tools.items())}
             return OpResult(op, "PASS", data=data)
@@ -146,6 +188,49 @@ class Bridge:
             time.sleep(READY_POLL_SECONDS)
         return OpResult(Op.START_PLAYTEST, "TIMEOUT", tool=started.tool,
                         error=f"no player joined within {READY_TIMEOUT_SECONDS:.0f}s")
+
+    def _sync(self, tools: dict[str, Tool]) -> OpResult:
+        if self.project_dir is None:
+            return OpResult(Op.SYNC, "ERROR", error="SYNC needs a project_dir")
+        try:
+            code = sync_code(build_payload(self.project_dir))
+        except (SyncError, OSError) as exc:
+            return OpResult(Op.SYNC, "ERROR", error=str(exc))
+        if "execute_luau" not in tools:
+            return OpResult(Op.SYNC, "UNSUPPORTED", error="Studio does not offer execute_luau")
+        return self._call(Op.SYNC, tools["execute_luau"],
+                          {"code": code, "datamodel_type": "Edit"})
+
+    def _health(self, tools: dict[str, Tool]) -> OpResult:
+        """PASS only if every player reaches ForgeReady and nothing logged an error."""
+        luau = tools.get("execute_luau")
+        if luau is None:
+            return OpResult(Op.HEALTH, "UNSUPPORTED", error="Studio does not offer execute_luau")
+        deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+        while True:
+            server = self._call(Op.HEALTH, luau, {"code": HEALTH_SERVER_LUAU.strip(),
+                                                  "datamodel_type": "Server"})
+            if server.status != "PASS" or not isinstance(server.data, dict):
+                return server
+            if (server.data.get("ready") or server.data.get("errors")
+                    or time.monotonic() >= deadline):
+                break
+            time.sleep(READY_POLL_SECONDS)
+        client = self._call(Op.HEALTH, luau, {"code": HEALTH_CLIENT_LUAU.strip(),
+                                              "datamodel_type": "Client"})
+        client_data = client.data if isinstance(client.data, dict) else {"raw": client.data}
+        data = {"server": server.data, "client": client_data}
+        problems = [f"server: {e}" for e in server.data.get("errors") or []]
+        problems += [f"client: {e}" for e in client_data.get("errors") or []]
+        if client.status != "PASS":
+            problems.append(f"client check failed: {client.error}")
+        if not server.data.get("ready"):
+            problems.append("players never reached ForgeReady" if problems else
+                            f"players not ForgeReady within {HEALTH_TIMEOUT_SECONDS:.0f}s")
+        if problems:
+            return OpResult(Op.HEALTH, "FAIL", tool=luau.name, data=data,
+                            error="\n".join(problems)[:4000])
+        return OpResult(Op.HEALTH, "PASS", tool=luau.name, data=data)
 
     def _call(self, op: Op, tool: Tool, args: dict) -> OpResult:
         if self.studio_id and "studio_id" in tool.params:

@@ -1,8 +1,9 @@
 --!strict
--- Persistence abstraction. Uses DataStoreService when available and falls back to
--- in-memory storage (e.g. Studio without API access) so playtests never crash on saves.
+-- Persistence abstraction. Uses DataStoreService in live servers and in-memory storage
+-- in Studio or whenever DataStores are unavailable, so playtests never crash on saves.
 
 local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
 
 local Economy = require(game:GetService("ReplicatedStorage").Shared.Economy)
 
@@ -14,7 +15,8 @@ local PlayerData = {}
 local store: DataStore? = nil
 local memory: { [string]: any } = {}
 
-do
+-- Studio playtests never touch real player data: they use memory.
+if not RunService:IsStudio() then
 	local ok, result = pcall(function()
 		return DataStoreService:GetDataStore(STORE_NAME)
 	end)
@@ -25,11 +27,22 @@ do
 	end
 end
 
+-- Studio without "Enable Studio Access to API Services" rejects every call; retrying
+-- cannot help, so switch to memory for the rest of the session.
+local function isPermanent(err: any): boolean
+	return string.find(tostring(err), "not allowed", 1, true) ~= nil
+end
+
 local function withRetry<T>(label: string, fn: () -> T): (boolean, T?)
 	for attempt = 1, MAX_ATTEMPTS do
 		local ok, result = pcall(fn)
 		if ok then
 			return true, result
+		end
+		if isPermanent(result) then
+			warn("[PlayerData] DataStore not allowed here, using memory")
+			store = nil
+			return false, nil
 		end
 		warn(
 			string.format(
@@ -54,7 +67,7 @@ function PlayerData.load(userId: number): Economy.State
 		return activeStore:GetAsync(key)
 	end)
 	if not ok then
-		return Economy.newState()
+		return Economy.sanitize(if store == nil then memory[key] else nil)
 	end
 	return Economy.sanitize(raw)
 end

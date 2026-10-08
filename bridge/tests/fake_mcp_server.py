@@ -5,6 +5,7 @@
   errors:  [tool names]                   tools that return isError
   hang:    [tool names]                   tools that never answer
   players: int                            readiness-poll answer (default 1)
+  health / client: dict                   HEALTH server / client answers
   log:     path                           append every tools/call as a JSON line
 """
 import json
@@ -47,6 +48,10 @@ for line in sys.stdin:
             text = json.dumps({"studios": cfg.get("studios", [])})
         elif name == "execute_luau" and args.get("code", "").startswith("return #game"):
             text = str(cfg.get("players", 1))  # playtest readiness poll
+        elif name == "execute_luau" and "ForgeReady" in args.get("code", ""):
+            text = json.dumps(cfg.get("health", {"ready": True, "players": [], "errors": []}))
+        elif name == "execute_luau" and "PlayerGui" in args.get("code", ""):
+            text = json.dumps(cfg.get("client", {"errors": [], "screens": ["MainHUD"]}))
         else:
             text = json.dumps({"tool": name, "ok": True})
         reply(rid, {"content": [{"type": "text", "text": text}],

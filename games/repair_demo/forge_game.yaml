@@ -1,0 +1,12 @@
+# Forge Roblox game manifest. Read by the Forge Roblox domain (not yet wired).
+game_id: repair_demo
+name: Repair Demo
+lane: experimental          # evergreen | trend-reactive | experimental
+autonomy_level: 1           # 0 observe, 1 build, 2 approved release
+maturity_band: all_ages
+roblox:
+  universe_id: null         # filled once the experience exists on Roblox
+  place_id: null
+gates:
+  static: [format, lint, typecheck, unit, build]
+  studio_scenarios: [qa/scenarios/core_loop.yaml]

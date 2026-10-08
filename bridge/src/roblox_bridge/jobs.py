@@ -17,13 +17,42 @@ from roblox_bridge.mcp_client import McpClient, McpError
 from roblox_bridge.ops import Bridge, Op
 
 JOB_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-ALLOWED_KEYS = {"job_id", "ops", "studio_id", "dry_run", "timeout_seconds"}
+ALLOWED_KEYS = {"job_id", "ops", "studio_id", "dry_run", "timeout_seconds", "project_dir"}
+# SYNC may only read projects under these roots (colon-separated override in env).
+DEFAULT_PROJECT_ROOTS = ["~/Roblox Games/games", "~/Voya/AutoDevFactory/worktrees"]
 MAX_OPS = 20
 MAX_TIMEOUT = 600
 
 # The AT-002 sequence: find Studio, inspect, play, probe, read output, stop.
 AT002_OPS = [Op.LIST_STUDIOS, Op.INSPECT, Op.START_PLAYTEST, Op.PROBE, Op.GET_LOGS,
              Op.STOP_PLAYTEST]
+# Read-only ops that still run after a failure, so a failed job carries its evidence.
+DIAGNOSTIC_OPS = {Op.GET_LOGS}
+# Named checks Forge can request. `core`: load the project and prove it boots cleanly.
+CHECKS: dict[str, list[Op]] = {
+    "at002": AT002_OPS,
+    "core": [Op.LIST_STUDIOS, Op.SYNC, Op.START_PLAYTEST, Op.HEALTH, Op.GET_LOGS,
+             Op.STOP_PLAYTEST],
+}
+
+
+def project_roots() -> list[Path]:
+    raw = os.environ.get("ROBLOX_BRIDGE_PROJECT_ROOTS")
+    roots = raw.split(":") if raw else DEFAULT_PROJECT_ROOTS
+    return [Path(r).expanduser().resolve() for r in roots if r]
+
+
+def _project_dir(value: object) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise JobError("project_dir must be a string")
+    path = Path(value).expanduser().resolve()
+    if not any(root == path or root in path.parents for root in project_roots()):
+        raise JobError(f"project_dir {path} is outside the allowed project roots")
+    if not (path / "default.project.json").is_file():
+        raise JobError(f"project_dir {path} has no default.project.json")
+    return path
 
 
 class JobError(ValueError):
@@ -52,8 +81,12 @@ def parse_job(raw: dict) -> dict:
     studio_id = raw.get("studio_id")
     if studio_id is not None and not isinstance(studio_id, str):
         raise JobError("studio_id must be a string")
+    project_dir = _project_dir(raw.get("project_dir"))
+    if Op.SYNC in parsed_ops and project_dir is None:
+        raise JobError("SYNC requires project_dir")
     return {
         "job_id": job_id,
+        "project_dir": project_dir,
         "ops": parsed_ops,
         "studio_id": studio_id,
         "dry_run": bool(raw.get("dry_run", False)),
@@ -66,11 +99,14 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
     results = []
     with client_factory() as client:
         bridge = Bridge(client, studio_id=job["studio_id"], dry_run=job["dry_run"],
-                        timeout=job["timeout_seconds"])
+                        timeout=job["timeout_seconds"], project_dir=job.get("project_dir"))
         playing = False
+        failed = False
         for op in job["ops"]:
             if op is Op.STOP_PLAYTEST and not playing and Op.START_PLAYTEST in job["ops"]:
                 continue  # never started, nothing to stop
+            if failed and op not in DIAGNOSTIC_OPS:
+                continue  # after a failure, only collect evidence (and clean up below)
             res = bridge.run(op)
             results.append(res.to_dict())
             if op is Op.LIST_STUDIOS and res.ok and bridge.studio_id is None:
@@ -86,16 +122,17 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
                 playing = True  # a start that timed out or failed may still have begun play
             if op is Op.STOP_PLAYTEST and res.ok:
                 playing = False
-            if not res.ok:
-                break
+            if not res.ok and op not in DIAGNOSTIC_OPS:
+                failed = True
         if playing:  # cleanup: never leave a playtest running
             res = bridge.run(Op.STOP_PLAYTEST)
             results.append(res.to_dict() | {"cleanup": True})
-    passed = all(r["ok"] for r in results) and len(results) >= len(job["ops"])
+    passed = not failed and all(r["ok"] for r in results) and len(results) >= len(job["ops"])
     return {
         "job_id": job["job_id"],
         "status": "PASS" if passed else "FAIL",
         "studio_id": bridge.studio_id,
+        "project_dir": str(job["project_dir"]) if job.get("project_dir") else None,
         "started_at": started,
         "finished_at": datetime.now(UTC).isoformat(),
         "results": results,
