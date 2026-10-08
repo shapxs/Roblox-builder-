@@ -83,3 +83,27 @@ platform today.
   hashed), sends the video card, and Approve re-verifies release id, commit, tree and
   place hash. Buttons go live once the branch is merged into the running Forge.
   Not yet: "reply to revise" handling (part of plain-English routing).
+
+## Codex review follow-up (2026-10-08)
+
+Batch A (trust): strict HEALTH schemas; second HEALTH after gameplay; Studio gate passes
+only on a complete report; finally/SIGTERM cleanup, SIGKILL + `recover` + quarantine;
+QA Studio required by name; real-time previews; stage timeline script. Found live: a client
+killed mid-capture wedges Studio's capture tool until restart (now detected, quarantined).
+
+Batch B (release integrity): sync full reconcile, rejects .meta.json/$properties/symlinks,
+reports a source identity; release = git-archived commit + pinned Rojo; release eligible
+only if required gates pass, capture passes with 0 runtime errors, video decodes and the
+tested scripts' identity equals the commit's; evidence.json hash bound into the approval;
+diagnostic cards have no buttons. Controller-owned `policy/` (baseline scenarios +
+economy invariants) mounted at /policy; minimum Roblox gate set enforced by the executor.
+Template: session-locked saves (no default-over-real overwrite), autosave, bounded
+shutdown saves, fault-injected Lune tests; economy growth x1.35 (was x2).
+
+Batch C (quality + speed): pacing checkpoints and edge-case scenario; design contract
+template; GAME_QUALITY guide; Roblox sandbox gates without DB services; review role
+think=False (6x/3x faster, same verdicts, scripts/review_think_probe.py).
+
+Open: exact-place QA in a dedicated QA place (batch D); vision review; mobile and
+two-player scenarios; proper 30-50 task builder benchmark; production-path e2e (the
+proof script still builds its own runner/registry).
