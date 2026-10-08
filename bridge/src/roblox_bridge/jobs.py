@@ -19,9 +19,11 @@ from roblox_bridge.scenario import NAME as SCENARIO_NAME
 
 JOB_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 ALLOWED_KEYS = {"job_id", "ops", "studio_id", "studio_name", "dry_run", "timeout_seconds",
-                "project_dir", "scenario"}
+                "project_dir", "scenario", "scenario_dir"}
 # Screenshots and preview video land in <capture root>/<job_id>-<timestamp>/.
 DEFAULT_CAPTURE_ROOT = "~/Roblox Games/artifacts/captures"
+# Controller-owned scenarios may only come from these roots (outside any game repo).
+DEFAULT_POLICY_ROOTS = ["~/Roblox Games/policy"]
 # SYNC may only read projects under these roots (colon-separated override in env).
 DEFAULT_PROJECT_ROOTS = ["~/Roblox Games/games", "~/Voya/AutoDevFactory/worktrees"]
 MAX_OPS = 20
@@ -54,6 +56,22 @@ def project_roots() -> list[Path]:
     raw = os.environ.get("ROBLOX_BRIDGE_PROJECT_ROOTS")
     roots = raw.split(":") if raw else DEFAULT_PROJECT_ROOTS
     return [Path(r).expanduser().resolve() for r in roots if r]
+
+
+def _scenario_dir(value: object) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise JobError("scenario_dir must be a string")
+    raw = os.environ.get("ROBLOX_BRIDGE_POLICY_ROOTS")
+    roots = [Path(r).expanduser().resolve()
+             for r in (raw.split(":") if raw else DEFAULT_POLICY_ROOTS) if r]
+    path = Path(value).expanduser().resolve()
+    if not any(root == path or root in path.parents for root in roots):
+        raise JobError(f"scenario_dir {path} is outside the policy roots")
+    if not path.is_dir():
+        raise JobError(f"scenario_dir {path} does not exist")
+    return path
 
 
 def _project_dir(value: object) -> Path | None:
@@ -108,10 +126,12 @@ def parse_job(raw: dict) -> dict:
             raise JobError("SCENARIO requires project_dir and a scenario name")
     elif scenario is not None:
         raise JobError("scenario given without a SCENARIO op")
+    scenario_dir = _scenario_dir(raw.get("scenario_dir"))
     return {
         "job_id": job_id,
         "project_dir": project_dir,
         "scenario": scenario,
+        "scenario_dir": scenario_dir,
         "ops": parsed_ops,
         "studio_id": studio_id,
         "studio_name": studio_name,
@@ -129,7 +149,8 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
     with client_factory() as client:
         bridge = Bridge(client, studio_id=job["studio_id"], dry_run=job["dry_run"],
                         timeout=job["timeout_seconds"], project_dir=job.get("project_dir"),
-                        scenario=job.get("scenario"), capture_dir=capture_dir,
+                        scenario=job.get("scenario"), scenario_dir=job.get("scenario_dir"),
+                        capture_dir=capture_dir,
                         client_factory=client_factory)
         playing = False
         failed = False

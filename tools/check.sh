@@ -17,4 +17,10 @@ gate typecheck luau-lsp analyze --platform=roblox \
   --definitions="$ROOT/tools/types/globalTypes.d.luau" \
   --sourcemap=artifacts/sourcemap.json --flag:LuauSolverV2=false src
 gate unit      lune run tests/run.luau
+# Controller-owned invariants (policy/<game> or policy/_baseline), outside the game repo.
+POLICY="$ROOT/policy/$(basename "$GAME")"
+[[ -d "$POLICY" ]] || POLICY="$ROOT/policy/_baseline"
+if [[ -f "$POLICY/tests/run.luau" ]]; then
+  gate policy  env GAME_ROOT="$GAME" lune run "$POLICY/tests/run.luau"
+fi
 gate build     rojo build default.project.json --output artifacts/place.rbxlx

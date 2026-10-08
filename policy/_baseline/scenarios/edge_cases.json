@@ -1,0 +1,23 @@
+{
+  "id": "edge_cases",
+  "max_duration_seconds": 150,
+  "steps": [
+    {"interact": {"target": "Sell"}},
+    {"assert": {"attribute": {"Cash": 0, "Carried": 0}}},
+    {"interact": {"target": "Upgrade"}},
+    {"assert": {"attribute": {"Level": 1, "Cash": 0}}},
+    {"interact": {"target": "Collect", "times": 13}},
+    {"assert": {"attribute": {"Carried": 10, "Capacity": 10}}},
+    {"capture": "bag_full"},
+    {"interact": {"target": "Sell"}},
+    {"interact": {"target": "Sell"}},
+    {"assert": {"attribute": {"Cash": 10, "Carried": 0}}},
+    {"interact": {"target": "Upgrade"}},
+    {"interact": {"target": "Upgrade"}},
+    {"assert": {"attribute": {"Level": 2, "Cash": 0}}},
+    {"respawn": true},
+    {"assert": {"attribute": {"Level": 2, "Cash": 0, "ForgeReady": true}}},
+    {"assert": {"ui_visible": "MainHUD"}},
+    {"capture": "after_respawn"}
+  ]
+}

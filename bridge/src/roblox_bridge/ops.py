@@ -133,6 +133,7 @@ class Bridge:
     timeout: float = 60.0
     project_dir: Path | None = None
     scenario: str | None = None
+    scenario_dir: Path | None = None
     capture_dir: Path | None = None
     client_factory: object = McpClient  # second connection for frame capture
     _tools: dict[str, Tool] = field(default_factory=dict)
@@ -225,7 +226,7 @@ class Bridge:
             return OpResult(Op.SCENARIO, "UNSUPPORTED",
                             error=f"Studio lacks {sorted(needed - set(tools))}")
         try:
-            scenario = load_scenario(self.project_dir, self.scenario)
+            scenario = load_scenario(self.project_dir, self.scenario, self.scenario_dir)
         except ScenarioError as exc:
             return OpResult(Op.SCENARIO, "ERROR", error=str(exc))
         if self.dry_run:

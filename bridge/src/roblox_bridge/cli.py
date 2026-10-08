@@ -48,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("name", choices=sorted(CHECKS))
     p_check.add_argument("--project")
     p_check.add_argument("--scenario", default="core_loop")
+    p_check.add_argument("--scenario-dir", help="controller-owned scenarios (policy root)")
     p_check.add_argument("--studio")
     p_check.add_argument("--studio-name", help="require the Studio whose title contains this")
     p_check.add_argument("--dry-run", action="store_true")
@@ -92,7 +93,9 @@ def main(argv: list[str] | None = None) -> int:
                      "studio_id": args.studio, "dry_run": args.dry_run,
                      "studio_name": getattr(args, "studio_name", None),
                      "project_dir": getattr(args, "project", None),
-                     **({"scenario": args.scenario} if name == "capture" else {})})
+                     **({"scenario": args.scenario} if name == "capture" else {}),
+                     **({"scenario_dir": args.scenario_dir}
+                        if name == "capture" and args.scenario_dir else {})})
     report = run_job(job)
     text = json.dumps(report, indent=2, default=str)
     if args.out:

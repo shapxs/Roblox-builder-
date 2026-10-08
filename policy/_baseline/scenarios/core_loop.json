@@ -1,0 +1,20 @@
+{
+  "id": "core_loop",
+  "max_duration_seconds": 150,
+  "steps": [
+    {"assert": {"ui_visible": "MainHUD"}},
+    {"capture": "spawn"},
+    {"interact": {"target": "Collect", "times": 5}},
+    {"assert": {"attribute": {"Carried": 5}}},
+    {"checkpoint": {"name": "first_action", "max_seconds": 15}},
+    {"interact": {"target": "Collect", "times": 5}},
+    {"interact": {"target": "Sell"}},
+    {"assert": {"attribute": {"Cash": 10, "Carried": 0}}},
+    {"checkpoint": {"name": "first_reward", "max_seconds": 60}},
+    {"capture": "first_reward"},
+    {"interact": {"target": "Upgrade"}},
+    {"assert": {"attribute": {"Level": 2, "Cash": 0, "Capacity": 20}}},
+    {"checkpoint": {"name": "first_upgrade", "max_seconds": 120}},
+    {"capture": "upgraded"}
+  ]
+}

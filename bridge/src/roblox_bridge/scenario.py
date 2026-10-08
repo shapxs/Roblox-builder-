@@ -19,6 +19,7 @@ scenario; release eligibility decides whether a video is required.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import shutil
@@ -37,6 +38,7 @@ ASSERT_WAIT_SECONDS = 3.0
 KEY_GAP_MS = 300
 OUTPUT_FPS = 10  # frames are held for their real capture interval: the preview is real-time
 SETTLE_SECONDS = 2.0
+RESPAWN_SETTLE_SECONDS = 4.0
 # A healthy capture takes ~0.5 s. Studio's capture tool can wedge (e.g. after a client is
 # killed mid-capture) and then never answers until Studio restarts.
 CAPTURE_TIMEOUT_SECONDS = 15.0
@@ -47,6 +49,12 @@ FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 ATTRIBUTES_LUAU = """
 local p = game:GetService("Players"):GetPlayers()[1]
 return game:GetService("HttpService"):JSONEncode(p and p:GetAttributes() or {})
+"""
+RESPAWN_LUAU = """
+local p = game:GetService("Players"):GetPlayers()[1]
+if p == nil then error("no player to respawn") end
+p:LoadCharacter()
+return "respawned"
 """
 SCREENS_LUAU = """
 local gui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
@@ -64,12 +72,16 @@ class ScenarioError(ValueError):
     pass
 
 
-def load_scenario(project_dir: Path, name: str) -> dict:
+def load_scenario(project_dir: Path, name: str, scenario_dir: Path | None = None) -> dict:
+    """Load <scenario_dir or project/qa/scenarios>/<name>.json. Forge passes a
+    controller-owned scenario_dir so a builder cannot weaken its own acceptance test."""
     if not NAME.match(name):
         raise ScenarioError(f"bad scenario name {name!r}")
-    path = Path(project_dir) / "qa" / "scenarios" / f"{name}.json"
+    base = Path(scenario_dir) if scenario_dir else Path(project_dir) / "qa" / "scenarios"
+    path = base / f"{name}.json"
     try:
-        data = json.loads(path.read_text())
+        raw = path.read_bytes()
+        data = json.loads(raw)
     except (OSError, json.JSONDecodeError) as exc:
         raise ScenarioError(f"cannot read {path}: {exc}") from exc
     steps = data.get("steps")
@@ -80,7 +92,8 @@ def load_scenario(project_dir: Path, name: str) -> dict:
     limit = data.get("max_duration_seconds", 120)
     if not isinstance(limit, int) or not 10 <= limit <= 600:
         raise ScenarioError("max_duration_seconds must be an int in 10..600")
-    return {"id": data.get("id", name), "steps": steps, "max_duration_seconds": limit}
+    return {"id": data.get("id", name), "steps": steps, "max_duration_seconds": limit,
+            "path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
 
 
 def _validate_step(i: int, step: object) -> None:
@@ -113,6 +126,14 @@ def _validate_step(i: int, step: object) -> None:
     elif kind == "wait":
         if not isinstance(arg, int | float) or not 0 < arg <= 30:
             raise ScenarioError(f"step {i}: wait must be 0..30 seconds")
+    elif kind == "respawn":
+        if arg is not True:
+            raise ScenarioError(f"step {i}: respawn takes true")
+    elif kind == "checkpoint":
+        if (not isinstance(arg, dict) or not NAME.match(str(arg.get("name", "")))
+                or not isinstance(arg.get("max_seconds"), int | float)
+                or not 0 < arg["max_seconds"] <= 600):
+            raise ScenarioError(f"step {i}: checkpoint needs a name and max_seconds 0..600")
     else:
         raise ScenarioError(f"step {i}: unknown action {kind!r}")
 
@@ -137,8 +158,9 @@ class ScenarioRunner:
         self._frame_times: list[float] = []
         recorder = threading.Thread(target=self._record, args=(frames, stop), daemon=True)
         recorder.start()
-        deadline = time.monotonic() + scenario["max_duration_seconds"]
-        steps, ok = [], True
+        started = time.monotonic()
+        deadline = started + scenario["max_duration_seconds"]
+        steps, ok, checkpoints = [], True, {}
         try:
             for i, step in enumerate(scenario["steps"]):
                 if time.monotonic() > deadline:
@@ -146,8 +168,12 @@ class ScenarioRunner:
                                   "detail": "scenario exceeded max_duration_seconds"})
                     ok = False
                     break
-                status, detail = self._step(step, shots)
-                steps.append({"step": i, "action": step, "status": status, "detail": detail})
+                if "checkpoint" in step:
+                    status, detail = self._checkpoint(step["checkpoint"], started, checkpoints)
+                else:
+                    status, detail = self._step(step, shots)
+                steps.append({"step": i, "action": step, "status": status, "detail": detail,
+                              "elapsed_s": round(time.monotonic() - started, 2)})
                 if status != "PASS":
                     ok = False
                     break
@@ -161,7 +187,9 @@ class ScenarioRunner:
         if self.capture_unresponsive:
             video_error = CAPTURE_WEDGED
         return {
-            "scenario": scenario["id"], "passed": ok, "steps": steps,
+            "scenario": scenario["id"], "scenario_sha256": scenario.get("sha256"),
+            "scenario_path": scenario.get("path"), "passed": ok, "steps": steps,
+            "checkpoints": checkpoints,
             "screenshots": sorted(str(p) for p in shots.glob("*.jpg")),
             "frames": len(list(frames.glob("*.jpg"))),
             "capture_fps": _fps(self._frame_times),
@@ -187,6 +215,10 @@ class ScenarioRunner:
         if kind == "wait":
             time.sleep(arg)
             return "PASS", None
+        if kind == "respawn":
+            self._luau(RESPAWN_LUAU, "Server")
+            time.sleep(RESPAWN_SETTLE_SECONDS)
+            return "PASS", None
         if kind == "capture":
             for _ in range(3):
                 if self._capture(shots / f"{arg}.jpg"):
@@ -196,6 +228,18 @@ class ScenarioRunner:
                 time.sleep(0.3)
             return "FAIL", "screen capture returned no image"
         return self._assert(arg)
+
+    @staticmethod
+    def _checkpoint(arg: dict, started: float, checkpoints: dict) -> tuple[str, object]:
+        """Pacing: this point in the session must be reached within max_seconds of the
+        scenario start (e.g. first reward within 60 s). Times are bot times - a lower
+        bound on a real player's - so a failure here is a real pacing problem."""
+        elapsed = round(time.monotonic() - started, 2)
+        checkpoints[arg["name"]] = elapsed
+        if elapsed > arg["max_seconds"]:
+            return "FAIL", {"checkpoint": arg["name"], "elapsed_s": elapsed,
+                            "max_seconds": arg["max_seconds"]}
+        return "PASS", {"checkpoint": arg["name"], "elapsed_s": elapsed}
 
     def _assert(self, arg: dict) -> tuple[str, object]:
         (cond, want), = arg.items()
