@@ -8,3 +8,7 @@
 .env
 legacy/**/.env
 legacy/**/*.duckdb
+.venv/
+__pycache__/
+.pytest_cache/
+queue/
