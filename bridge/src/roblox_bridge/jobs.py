@@ -25,7 +25,8 @@ DEFAULT_CAPTURE_ROOT = "~/Roblox Games/artifacts/captures"
 # Controller-owned scenarios may only come from these roots (outside any game repo).
 DEFAULT_POLICY_ROOTS = ["~/Roblox Games/policy"]
 # SYNC may only read projects under these roots (colon-separated override in env).
-DEFAULT_PROJECT_ROOTS = ["~/Roblox Games/games", "~/Voya/AutoDevFactory/worktrees"]
+DEFAULT_PROJECT_ROOTS = ["~/Roblox Games/games", "~/Voya/AutoDevFactory/worktrees",
+                         "~/Roblox Games/artifacts/rc-src"]  # frozen release sources
 MAX_OPS = 20
 MAX_TIMEOUT = 600
 
