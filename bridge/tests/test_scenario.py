@@ -114,3 +114,14 @@ def test_preview_is_real_time_not_sped_up(game, monkeypatch):
                           "-of", "csv=p=0", data["video"]], capture_output=True, text=True)
     # ~2 s of scenario + 2 s settle: a sped-up preview would be about half that.
     assert float(out.stdout) >= 3.0
+
+
+def test_wedged_capture_tool_fails_fast_with_a_clear_reason(game, monkeypatch):
+    monkeypatch.setattr("roblox_bridge.scenario.CAPTURE_TIMEOUT_SECONDS", 1.0)
+    factory = fake(monkeypatch, attributes={}, hang=["screen_capture"])
+    name = scenario(game, [{"capture": "spawn"}])
+    report = run_job(capture_job(game, name), factory)
+    step = next(r for r in report["results"] if r["op"] == "SCENARIO")
+    assert step["status"] == "FAIL" and "restart Roblox Studio" in step["error"]
+    assert step["data"]["capture_unresponsive"] is True
+    assert report["results"][-1]["op"] == "STOP_PLAYTEST"

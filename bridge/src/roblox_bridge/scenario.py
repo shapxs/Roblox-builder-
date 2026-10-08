@@ -36,7 +36,12 @@ MAX_TIMES = 50
 ASSERT_WAIT_SECONDS = 3.0
 KEY_GAP_MS = 300
 OUTPUT_FPS = 10  # frames are held for their real capture interval: the preview is real-time
-SETTLE_SECONDS = 2.0  # let late errors (after the last step) reach the log before HEALTH
+SETTLE_SECONDS = 2.0
+# A healthy capture takes ~0.5 s. Studio's capture tool can wedge (e.g. after a client is
+# killed mid-capture) and then never answers until Studio restarts.
+CAPTURE_TIMEOUT_SECONDS = 15.0
+CAPTURE_WEDGED = ("screen_capture timed out: Studio's capture tool is unresponsive "
+                  "(restart Roblox Studio)")  # let late errors (after the last step) reach the log before HEALTH
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 
 ATTRIBUTES_LUAU = """
@@ -121,6 +126,7 @@ class ScenarioRunner:
         self.client_factory = client_factory
         # Studio returns an empty image when two captures overlap, so they take turns.
         self._capture_lock = threading.Lock()
+        self.capture_unresponsive = False
 
     def run(self, scenario: dict) -> dict:
         shots = self.out_dir / "screenshots"
@@ -152,12 +158,15 @@ class ScenarioRunner:
             recorder.join(timeout=5)  # daemon thread; never delay cleanup for video
         self._capture(shots / "final.jpg")
         video, video_error = self._stitch(frames)
+        if self.capture_unresponsive:
+            video_error = CAPTURE_WEDGED
         return {
             "scenario": scenario["id"], "passed": ok, "steps": steps,
             "screenshots": sorted(str(p) for p in shots.glob("*.jpg")),
             "frames": len(list(frames.glob("*.jpg"))),
             "capture_fps": _fps(self._frame_times),
             "video_speed": "real-time" if video else None,
+            "capture_unresponsive": self.capture_unresponsive,
             "video": str(video) if video else None, "video_error": video_error,
         }
 
@@ -182,6 +191,8 @@ class ScenarioRunner:
             for _ in range(3):
                 if self._capture(shots / f"{arg}.jpg"):
                     return "PASS", None
+                if self.capture_unresponsive:
+                    return "FAIL", CAPTURE_WEDGED
                 time.sleep(0.3)
             return "FAIL", "screen capture returned no image"
         return self._assert(arg)
@@ -205,8 +216,10 @@ class ScenarioRunner:
 
     # -- Studio calls ----------------------------------------------------
 
-    def _tool(self, name: str, args: dict, client: McpClient | None = None) -> dict:
-        raw = (client or self.client).call_tool(name, {**args, "studio_id": self.studio_id})
+    def _tool(self, name: str, args: dict, client: McpClient | None = None,
+              timeout: float | None = None) -> dict:
+        raw = (client or self.client).call_tool(name, {**args, "studio_id": self.studio_id},
+                                                timeout=timeout)
         if raw.get("isError"):
             text = " ".join(i.get("text", "") for i in raw.get("content", []))
             raise McpError(f"{name}: {text[:500]}")
@@ -222,10 +235,15 @@ class ScenarioRunner:
             return text
 
     def _capture(self, path: Path, client: McpClient | None = None) -> bool:
+        if self.capture_unresponsive:
+            return False
         try:
             with self._capture_lock:
-                raw = self._tool("screen_capture", {"capture_id": path.stem}, client)
-        except McpError:
+                raw = self._tool("screen_capture", {"capture_id": path.stem}, client,
+                                 timeout=CAPTURE_TIMEOUT_SECONDS)
+        except McpError as exc:
+            if "timed out" in str(exc):
+                self.capture_unresponsive = True
             return False
         for item in raw.get("content", []):
             if item.get("type") == "image" and item.get("data"):
@@ -247,6 +265,8 @@ class ScenarioRunner:
                     if self._capture(frames / f"frame_{n:05d}.jpg", client):
                         self._frame_times.append(taken)
                         n += 1
+                    elif self.capture_unresponsive:
+                        return
                     else:
                         time.sleep(0.25)
         except McpError:

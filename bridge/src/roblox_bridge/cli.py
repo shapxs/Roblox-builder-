@@ -90,7 +90,8 @@ def main(argv: list[str] | None = None) -> int:
 def recover(studio_name: str | None) -> int:
     """After a killed or timed-out run: stop play on a fresh connection, confirm Edit mode.
 
-    Exit 0 = Studio is back in Edit mode; 1 = still not in Edit mode; 2 = Studio not found.
+    Exit 0 = Studio is back in Edit mode and can capture; 1 = still not in Edit mode;
+    2 = Studio not found; 3 = Edit mode but the capture tool is unresponsive.
     """
     with McpClient() as client:
         bridge = Bridge(client)
@@ -111,6 +112,24 @@ def recover(studio_name: str | None) -> int:
                 break
             bridge.run(Op.STOP_PLAYTEST)
             time.sleep(2.0)
-    print(json.dumps({"recovered": in_edit, "studio_id": studio_id,
-                      "state": str(state.data)[:300]}))
-    return 0 if in_edit else 1
+        # A client killed mid-capture can wedge Studio's capture tool while every other
+        # tool keeps working; a Studio in that state is not fit for capture runs.
+        capture_ok = in_edit and _capture_responds(client, studio_id)
+    print(json.dumps({"recovered": in_edit and capture_ok, "studio_id": studio_id,
+                      "capture_ok": capture_ok, "state": str(state.data)[:300]}))
+    if not in_edit:
+        return 1
+    return 0 if capture_ok else 3
+
+
+def _capture_responds(client: McpClient, studio_id: str) -> bool:
+    from roblox_bridge.mcp_client import McpError
+    from roblox_bridge.scenario import CAPTURE_TIMEOUT_SECONDS
+
+    try:
+        raw = client.call_tool("screen_capture", {"capture_id": "recover_probe",
+                                                  "studio_id": studio_id},
+                               timeout=CAPTURE_TIMEOUT_SECONDS)
+    except McpError:
+        return False
+    return any(i.get("type") == "image" and i.get("data") for i in raw.get("content", []))
