@@ -82,8 +82,8 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
                               f"{count} Studios are open: pass an explicit studio_id")
                     results[-1].update(status="FAIL", ok=False, error=reason)
                     break
-            if op is Op.START_PLAYTEST and res.ok:
-                playing = True
+            if op is Op.START_PLAYTEST and res.status not in {"UNSUPPORTED", "DRY_RUN"}:
+                playing = True  # a start that timed out or failed may still have begun play
             if op is Op.STOP_PLAYTEST and res.ok:
                 playing = False
             if not res.ok:

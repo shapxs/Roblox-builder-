@@ -3,11 +3,9 @@
 Jobs name an operation; they never supply tool names or Luau. Every tool name and
 every Luau snippet that can reach Studio is a constant in this file.
 
-The built-in Studio MCP only lists its full tool surface while a Studio session is
-connected, so names are resolved at runtime from `tools/list` against candidate lists.
-Only `list_roblox_studios` has been seen live so far; the other candidates come from
-Roblox's published MCP servers and must be confirmed with `roblox-bridge tools`
-while Studio is open (see docs/roblox/HOST_BRIDGE.md).
+Tool names and arguments match Studio 0.742's built-in MCP server (seen live
+2026-10-08). Studio's own tools are only listed while a place is connected;
+`list_roblox_studios` is served by the proxy and always callable.
 """
 from __future__ import annotations
 
@@ -22,6 +20,7 @@ from roblox_bridge.mcp_client import McpClient, McpError, Tool
 class Op(StrEnum):
     LIST_STUDIOS = "LIST_STUDIOS"
     LIST_TOOLS = "LIST_TOOLS"
+    STUDIO_STATE = "STUDIO_STATE"
     INSPECT = "INSPECT"
     START_PLAYTEST = "START_PLAYTEST"
     PROBE = "PROBE"
@@ -29,25 +28,11 @@ class Op(StrEnum):
     STOP_PLAYTEST = "STOP_PLAYTEST"
 
 
-# Each op tries these (tool, fixed arguments) pairs in order; first tool present wins.
-CANDIDATES: dict[Op, list[tuple[str, dict]]] = {
-    Op.START_PLAYTEST: [
-        ("start_playtest", {}),
-        ("start_stop_play", {"mode": "start_play"}),
-    ],
-    Op.STOP_PLAYTEST: [
-        ("stop_playtest", {}),
-        ("start_stop_play", {"mode": "stop"}),
-    ],
-    Op.GET_LOGS: [
-        ("get_output_logs", {}),
-        ("get_console_output", {}),
-    ],
-}
-
-# Tools that execute Luau; the snippet goes into the tool's single required string param.
-RUN_CODE_TOOLS = ["run_code", "execute_luau", "run_luau", "execute_code"]
-RUNTIME_EVAL_TOOLS = ["eval_server_runtime", "run_script_in_play_mode", *RUN_CODE_TOOLS]
+READY_LUAU = 'return #game:GetService("Players"):GetPlayers()'
+READY_POLL_SECONDS = 1.0
+READY_TIMEOUT_SECONDS = 45.0
+# Studio registers with a freshly started proxy a few seconds after it launches.
+DISCOVERY_SECONDS = 10.0
 
 INSPECT_LUAU = """
 local out = {}
@@ -71,6 +56,16 @@ return game:GetService("HttpService"):JSONEncode({
 	players = players,
 })
 """
+
+# op -> (tool, fixed arguments). Luau ops carry their snippet and target datamodel.
+CALLS: dict[Op, tuple[str, dict]] = {
+    Op.STUDIO_STATE: ("get_studio_state", {}),
+    Op.INSPECT: ("execute_luau", {"code": INSPECT_LUAU.strip(), "datamodel_type": "Edit"}),
+    Op.START_PLAYTEST: ("start_stop_play", {"is_start": True}),
+    Op.PROBE: ("execute_luau", {"code": PROBE_LUAU.strip(), "datamodel_type": "Server"}),
+    Op.GET_LOGS: ("get_console_output", {}),
+    Op.STOP_PLAYTEST: ("start_stop_play", {"is_start": False}),
+}
 
 
 @dataclass
@@ -120,28 +115,37 @@ class Bridge:
         if op is Op.LIST_STUDIOS:
             # Served by the proxy itself: callable even before any Studio connects,
             # when tools/list is still empty.
-            return self._call(op, Tool("list_roblox_studios"), {})
+            deadline = time.monotonic() + DISCOVERY_SECONDS
+            while True:
+                result = self._call(op, Tool("list_roblox_studios"), {})
+                found = isinstance(result.data, dict) and result.data.get("studios")
+                if result.status != "PASS" or found or time.monotonic() >= deadline:
+                    return result
+                time.sleep(READY_POLL_SECONDS)
         tools = self.tools()
         if op is Op.LIST_TOOLS:
             data = {n: sorted(t.params) for n, t in sorted(tools.items())}
             return OpResult(op, "PASS", data=data)
-        if op is Op.INSPECT:
-            return self._run_luau(op, RUN_CODE_TOOLS, INSPECT_LUAU)
-        if op is Op.PROBE:
-            return self._run_luau(op, RUNTIME_EVAL_TOOLS, PROBE_LUAU)
-        for name, args in CANDIDATES[op]:
-            if name in tools:
-                return self._call(op, tools[name], dict(args))
-        return self._unsupported(op, [n for n, _ in CANDIDATES[op]])
+        name, args = CALLS[op]
+        if name not in tools:
+            return OpResult(op, "UNSUPPORTED",
+                            error=f"Studio does not offer {name!r}; available: {sorted(tools)}")
+        result = self._call(op, tools[name], dict(args))
+        if op is Op.START_PLAYTEST and result.status == "PASS":
+            return self._wait_until_ready(result, tools["execute_luau"])
+        return result
 
-    def _run_luau(self, op: Op, candidates: list[str], snippet: str) -> OpResult:
-        tools = self.tools()
-        for name in candidates:
-            tool = tools.get(name)
-            param = _code_param(tool) if tool else None
-            if tool and param:
-                return self._call(op, tool, {param: snippet.strip()})
-        return self._unsupported(op, candidates)
+    def _wait_until_ready(self, started: OpResult, luau: Tool) -> OpResult:
+        """start_stop_play returns before the server has a player; poll until it does."""
+        deadline = time.monotonic() + READY_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            probe = self._call(Op.START_PLAYTEST, luau,
+                               {"code": READY_LUAU, "datamodel_type": "Server"})
+            if probe.status == "PASS" and _as_int(probe.data) > 0:
+                return started
+            time.sleep(READY_POLL_SECONDS)
+        return OpResult(Op.START_PLAYTEST, "TIMEOUT", tool=started.tool,
+                        error=f"no player joined within {READY_TIMEOUT_SECONDS:.0f}s")
 
     def _call(self, op: Op, tool: Tool, args: dict) -> OpResult:
         if self.studio_id and "studio_id" in tool.params:
@@ -154,17 +158,12 @@ class Bridge:
         return OpResult(op, status, tool=tool.name, data=data,
                         error=_text(data) if status == "FAIL" else None)
 
-    def _unsupported(self, op: Op, wanted: list[str]) -> OpResult:
-        return OpResult(op, "UNSUPPORTED",
-                        error=f"none of {wanted} offered; available: {sorted(self.tools())}")
 
-
-def _code_param(tool: Tool) -> str | None:
-    props = tool.input_schema.get("properties", {})
-    required = tool.input_schema.get("required", list(props))
-    strings = [p for p in required if props.get(p, {}).get("type") == "string"
-               and p != "studio_id"]
-    return strings[0] if len(strings) == 1 else None
+def _as_int(data: object) -> int:
+    try:
+        return int(str(data).strip())
+    except ValueError:
+        return 0
 
 
 def _content(raw: dict) -> object:

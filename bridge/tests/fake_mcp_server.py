@@ -4,6 +4,7 @@
   studios: [..]                           list_roblox_studios payload
   errors:  [tool names]                   tools that return isError
   hang:    [tool names]                   tools that never answer
+  players: int                            readiness-poll answer (default 1)
   log:     path                           append every tools/call as a JSON line
 """
 import json
@@ -44,6 +45,8 @@ for line in sys.stdin:
             continue
         if name == "list_roblox_studios":
             text = json.dumps({"studios": cfg.get("studios", [])})
+        elif name == "execute_luau" and args.get("code", "").startswith("return #game"):
+            text = str(cfg.get("players", 1))  # playtest readiness poll
         else:
             text = json.dumps({"tool": name, "ok": True})
         reply(rid, {"content": [{"type": "text", "text": text}],

@@ -35,12 +35,20 @@ cd ~/Roblox\ Games/bridge
 .venv/bin/pytest -q                    # tests against a fake MCP server
 ```
 
-## Status (2026-10-08)
+## Status
 
-- Verified live: the MCP handshake with Studio 0.736's `StudioMCP`, and
-  `list_roblox_studios`. Studio's own playtest and code tools only show up once a Studio
-  session is connected.
-- Not yet verified: the names and arguments of the playtest, log and code tools. They are
-  candidates (`ops.py` `CANDIDATES`) taken from Roblox's published MCP servers. A missing
-  tool returns `UNSUPPORTED` with the real tool list; the bridge never guesses further.
-  Once Studio is open, `roblox-bridge tools` gives the ground truth for fixing the mapping.
+AT-002 passed live on 2026-10-08 against Studio 0.742 ("Forge Experience", placeId
+104663411813641): LIST_STUDIOS 3.0 s, INSPECT, START_PLAYTEST 6.6 s (server reports
+1 player), PROBE, GET_LOGS, STOP_PLAYTEST. ~11 s end to end.
+
+Live facts the bridge depends on:
+- Studio registers with a fresh `StudioMCP` proxy ~3 s after it starts; LIST_STUDIOS
+  polls for up to 10 s.
+- Tools used: `list_roblox_studios`, `get_studio_state`, `start_stop_play {is_start}`,
+  `get_console_output`, `execute_luau {code, datamodel_type: Edit|Server|Client}`.
+- `start_stop_play` returns before the server has a player; START_PLAYTEST polls the
+  Server DataModel until one joins (45 s cap).
+- Also offered and not yet used: `screen_capture`, `character_navigation`,
+  `user_mouse_input`, `user_keyboard_input`, `search_game_tree`, `inspect_instance`,
+  `script_read`, `multi_edit`. Asset generation/insertion and `http_get` are deliberately
+  not exposed.
