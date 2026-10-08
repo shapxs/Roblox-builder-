@@ -13,6 +13,7 @@ games/<id>/         one isolated project per game
 tools/check.sh      static gates for one game
 tools/new_game.sh   create a game from the template
 tools/types/        vendored Roblox type definitions (offline gates)
+bridge/             host-side Studio MCP bridge (docs/roblox/HOST_BRIDGE.md)
 docs/roblox/        integration map and plan
 legacy/             June 2026 night-agent prototype (reference only)
 ```
