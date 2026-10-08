@@ -75,3 +75,11 @@ platform today.
   that fix as scope creep (it invented a new bonus rule); attempt 3 made the minimal fix,
   all gates passed, the reviewer accepted, and the controller merged. 21 minutes, audit
   chain intact.
+- **Capture: PASS live.** `roblox-bridge check capture` plays the `core_loop` scenario
+  (walk + press E via Studio's character_navigation / user_keyboard_input), asserts game
+  state after every step (13/13), saves named screenshots and a ~2 fps preview MP4.
+- **Review card (AT-005 binding): built and unit-tested; preview sent live.** Forge branch
+  `roblox_release.py` freezes rc-NNNN (place file built from `git archive` of one commit,
+  hashed), sends the video card, and Approve re-verifies release id, commit, tree and
+  place hash. Buttons go live once the branch is merged into the running Forge.
+  Not yet: "reply to revise" handling (part of plain-English routing).
