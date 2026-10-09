@@ -67,3 +67,16 @@ The Telegram buttons are handled by the running Forge controller once the
   release again (it is still frozen) or use the Creator Dashboard's version history.
 - Places containing EditableImage, EditableMesh, PartOperation, SurfaceAppearance or
   BaseWrap instances cannot be updated through the API (template games use none).
+
+## First publish (2026-10-09)
+
+`capture_demo` rc-0002 (commit cc36343d28) → staging, Roblox version 20,
+https://www.roblox.com/games/104663411813641. Shipped in 54 s (all gates, core_loop and
+edge_cases on the frozen commit), approved from the Mac with `approve --confirm`.
+
+Lessons from the first attempts (all refused safely, nothing uploaded):
+- 403 "Scope not authorized": the key needs universe-places → Write for the experience;
+  the read-only pre-check passes without it.
+- 409 "Server is busy": a Studio (Team Create) session holding the place locks it against
+  API publishes. Never keep the staging/production place open in Studio; QA testing uses
+  a separate local place.
