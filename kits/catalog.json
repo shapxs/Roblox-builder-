@@ -1,0 +1,49 @@
+[
+  {
+    "id": "atmosphere",
+    "version": "1.0.0",
+    "summary": "Named lighting moods (day, sunset, twilight, night, spooky, underwater) with real volumetric fog (Atmosphere instance), colour grading, and blending for day/night cycles.",
+    "module": "ReplicatedStorage.Shared.Kits.Atmosphere",
+    "usage": [
+      "Atmosphere.apply(Lighting, \"twilight\")  -- or a preset table",
+      "Atmosphere.blend(\"day\", \"night\", t) -> preset  -- for day/night cycles",
+      "Atmosphere.Presets.<name>  -- data you can copy and tweak; Atmosphere.validate(preset)"
+    ]
+  },
+  {
+    "id": "leaderboard",
+    "version": "1.0.0",
+    "summary": "Player-list stats (leaderstats) set only by the server, plus ranking helpers and number abbreviation for in-world boards and HUD panels.",
+    "module": "ReplicatedStorage.Shared.Kits.Leaderboard",
+    "usage": [
+      "Leaderboard.define(player, {\"Cash\", \"Mushrooms\"})  -- on PlayerAdded, up to 4 stats",
+      "Leaderboard.set(player, stat, value) / Leaderboard.get(player, stat)",
+      "Leaderboard.top(Leaderboard.snapshot(Players:GetPlayers(), stat), 5) -> {name, value}[]",
+      "Leaderboard.rankOf(entries, name); Leaderboard.abbreviate(1250) -> \"1.2K\""
+    ]
+  },
+  {
+    "id": "feedback",
+    "version": "1.0.0",
+    "summary": "Action feedback: floating +N pop-ups, HUD bounce and flash, particle bursts, a colour palette, and number formatting.",
+    "module": "ReplicatedStorage.Shared.Kits.Feedback",
+    "usage": [
+      "Feedback.popup(screenGui, Feedback.delta(5), Feedback.color(\"reward\"))  -- client",
+      "Feedback.bounce(guiObject); Feedback.flash(guiObject, color)  -- client",
+      "Feedback.burst(part, Feedback.color(\"magic\"), 20)  -- server or client",
+      "Feedback.delta(1250) -> \"+1,250\"; Feedback.spread(i, n) for stacked pop-ups; palette: reward, gain, loss, info, magic"
+    ]
+  },
+  {
+    "id": "unlocks",
+    "version": "1.0.0",
+    "summary": "Qualitative progression: level-gated unlock rules, newly-unlocked detection for announcements, next-unlock hints, and showing/hiding world content tagged with an Unlock attribute.",
+    "module": "ReplicatedStorage.Shared.Kits.Unlocks",
+    "usage": [
+      "local RULES = Unlocks.define({ {id=\"glow_basket\", level=5, title=\"Glowing basket\"}, ... })",
+      "Unlocks.newly(RULES, oldLevel, newLevel) -> rules crossed (announce them)",
+      "Unlocks.isUnlocked(RULES, id, level); Unlocks.unlockedAt(RULES, level); Unlocks.nextAfter(RULES, level)",
+      "Unlocks.applyWorld(workspace, RULES, level)  -- parts/models with attribute Unlock=\"<id>\""
+    ]
+  }
+]

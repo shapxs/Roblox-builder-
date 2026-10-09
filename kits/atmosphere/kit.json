@@ -1,0 +1,21 @@
+{
+  "id": "atmosphere",
+  "version": "1.0.0",
+  "summary": "Named lighting moods (day, sunset, twilight, night, spooky, underwater) with real volumetric fog (Atmosphere instance), colour grading, and blending for day/night cycles.",
+  "module": "ReplicatedStorage.Shared.Kits.Atmosphere",
+  "usage": [
+    "Atmosphere.apply(Lighting, \"twilight\")  -- or a preset table",
+    "Atmosphere.blend(\"day\", \"night\", t) -> preset  -- for day/night cycles",
+    "Atmosphere.Presets.<name>  -- data you can copy and tweak; Atmosphere.validate(preset)"
+  ],
+  "files": [
+    {
+      "from": "src/Atmosphere.luau",
+      "to": "src/shared/Kits/Atmosphere.luau"
+    },
+    {
+      "from": "tests/Atmosphere.spec.luau",
+      "to": "tests/unit/Kit_Atmosphere.spec.luau"
+    }
+  ]
+}
