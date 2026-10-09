@@ -22,7 +22,7 @@ and staging publishing. `capture_demo` was published to private staging on 2026-
 [builder comparison](evidence/builder-comparison-2026-10-08.md) is one task per model;
 1.9 minutes is an encouraging smoke result, not a qualified fleet-wide speed claim.
 
-## Changes made during this audit
+## Changes made during the initial audit
 
 | Change | Why | Verification |
 |---|---|---|
@@ -32,8 +32,8 @@ and staging publishing. `capture_demo` was published to private staging on 2026-
 | `tools/check.sh` now falls back to baseline policy for a publish-only game folder | A publish destination previously hid the required baseline tests in the shell check, disagreeing with Forge's policy resolver | `capture_demo` static/policy/build checks pass |
 | Template and both current games reject stale saves | Overlapping autosave, leave, and shutdown requests could finish out of order | Reordered-save and later-lease unit tests; local checks for all three games |
 
-These are local fixes. They do not replace the Forge production gates or the live Studio
-checks. No files in the Forge checkout were changed.
+These initial local fixes did not replace the Forge production gates or the live Studio
+checks. The subsequent release-path changes are recorded below.
 
 ## Deep audit addendum — release-path blockers
 
@@ -294,7 +294,10 @@ and missing-edge-evidence repros above. The Forge worktree and live checkout poi
 the same commit at audit time, but the live checkout has local changes, so this audit
 did not modify or reconcile it. No live Studio or Open Cloud action was performed.
 
-After the fixes, the template's complete local check passed (format, lint, sourcemap,
-typecheck, unit, policy, build). Forge's broad pytest run passed 868 tests and skipped
-71; 12 unrelated Ollama integration tests could not set up because this sandbox denies
-binding a localhost test server. The focused release suite was rerun separately.
+After the fixes, complete local checks passed for the template and both game copies
+(format, lint, sourcemap, typecheck, unit, policy, build). Forge's broad pytest run
+passed 868 tests and skipped 71 when the localhost-only Ollama integration module was
+excluded; its 12 tests could not set up because this sandbox denies binding a localhost
+test server. The focused release suite passed 72 tests. The fixes are recorded as
+commits `9b412b8` (isolated Forge branch), `1616f82` (this workspace), and `2c8770a`
+(generated mushroom game). The live Forge checkout was not modified.
