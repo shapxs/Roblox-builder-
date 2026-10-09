@@ -3,6 +3,8 @@
 Workspace for every Roblox game Forge builds. Forge itself lives in
 `~/Voya/AutoDevFactory/repo`; see [docs/roblox/ROBLOX_INTEGRATION_PLAN.md](docs/roblox/ROBLOX_INTEGRATION_PLAN.md).
 
+Current audit and prioritized handoff: [docs/roblox/PROJECT_AUDIT_2026-10-09.md](docs/roblox/PROJECT_AUDIT_2026-10-09.md).
+
 ## Layout
 
 ```text

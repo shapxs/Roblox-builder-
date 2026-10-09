@@ -9,8 +9,8 @@ local process = require("@lune/process")
 local root = process.env.GAME_ROOT or "/workspace"
 local path = root .. "/src/shared/Economy.luau"
 if not fs.isFile(path) then
-	print("policy: no src/shared/Economy.luau; economy invariants do not apply")
-	process.exit(0)
+	print("POLICY FAIL: required src/shared/Economy.luau is missing")
+	process.exit(1)
 end
 local Economy = luau.load(fs.readFile(path), { debugName = "Economy" })()
 

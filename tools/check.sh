@@ -4,6 +4,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GAME="$(cd "${1:?usage: tools/check.sh games/<id>}" && pwd)"
+POLICY="$ROOT/policy/$(basename "$GAME")"
+[[ -d "$POLICY" ]] || POLICY="$ROOT/policy/_baseline"
+if [[ ! -f "$POLICY/tests/run.luau" ]]; then
+  echo "required policy test missing: $POLICY/tests/run.luau" >&2
+  exit 1
+fi
 export PATH="$HOME/.rokit/bin:$PATH"
 cd "$GAME"
 mkdir -p artifacts
@@ -18,9 +24,5 @@ gate typecheck luau-lsp analyze --platform=roblox \
   --sourcemap=artifacts/sourcemap.json --flag:LuauSolverV2=false src
 gate unit      lune run tests/run.luau
 # Controller-owned invariants (policy/<game> or policy/_baseline), outside the game repo.
-POLICY="$ROOT/policy/$(basename "$GAME")"
-[[ -d "$POLICY" ]] || POLICY="$ROOT/policy/_baseline"
-if [[ -f "$POLICY/tests/run.luau" ]]; then
-  gate policy  env GAME_ROOT="$GAME" lune run "$POLICY/tests/run.luau"
-fi
+gate policy  env GAME_ROOT="$GAME" lune run "$POLICY/tests/run.luau"
 gate build     rojo build default.project.json --output artifacts/place.rbxlx
