@@ -113,8 +113,8 @@ def recover(studio_name: str | None) -> int:
     with McpClient() as client:
         bridge = Bridge(client)
         found = bridge.run(Op.LIST_STUDIOS)
-        studio_id, reason = _pick_studio(found.data, studio_name) if found.ok else (None,
-                                                                                  found.error)
+        data = bridge.name_untitled(found.data) if found.ok and studio_name else found.data
+        studio_id, reason = _pick_studio(data, studio_name) if found.ok else (None, found.error)
         if studio_id is None:
             print(json.dumps({"recovered": False, "error": reason}))
             return 2

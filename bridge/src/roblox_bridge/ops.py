@@ -63,6 +63,8 @@ return game:GetService("HttpService"):JSONEncode({
 })
 """
 
+PLACE_NAME_LUAU = "return game.Name"
+
 # Game contract: the server sets player attribute ForgeReady once the player is loaded.
 HEALTH_SERVER_LUAU = """
 local Players = game:GetService("Players")
@@ -196,6 +198,28 @@ class Bridge:
             time.sleep(READY_POLL_SECONDS)
         return OpResult(Op.START_PLAYTEST, "TIMEOUT", tool=started.tool,
                         error=f"no player joined within {READY_TIMEOUT_SECONDS:.0f}s")
+
+    def name_untitled(self, data: object) -> object:
+        """Local (unpublished) places have no title over MCP. Ask each untitled session
+        for its DataModel name so a QA place can still be selected by name. Sessions on
+        the start page have no place open and stay untitled."""
+        studios = data.get("studios") if isinstance(data, dict) else None
+        if not isinstance(studios, list) or self.dry_run:
+            return data
+        named = []
+        for studio in studios:
+            if isinstance(studio, dict) and studio.get("name") is None and studio.get("id"):
+                try:
+                    raw = self.client.call_tool("execute_luau", {
+                        "code": PLACE_NAME_LUAU, "datamodel_type": "Edit",
+                        "studio_id": studio["id"]}, timeout=15)
+                    text = _content(raw)
+                    if not raw.get("isError") and isinstance(text, str) and text.strip():
+                        studio = studio | {"name": f"{text.strip()} (local file)"}
+                except McpError:
+                    pass
+            named.append(studio)
+        return data | {"studios": named}
 
     def _sync(self, tools: dict[str, Tool]) -> OpResult:
         if self.project_dir is None:

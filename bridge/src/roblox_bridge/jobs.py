@@ -164,6 +164,9 @@ def run_job(job: dict, client_factory: Callable[[], McpClient] = McpClient) -> d
                 res = bridge.run(op)
                 results.append(res.to_dict())
                 if op is Op.LIST_STUDIOS and res.ok and bridge.studio_id is None:
+                    if job.get("studio_name"):
+                        res.data = bridge.name_untitled(res.data)
+                        results[-1]["data"] = res.data
                     bridge.studio_id, reason = _pick_studio(res.data, job.get("studio_name"))
                     if bridge.studio_id is None and not job["dry_run"]:
                         results[-1].update(status="FAIL", ok=False, error=reason)

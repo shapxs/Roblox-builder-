@@ -1,0 +1,22 @@
+{
+  "name": "ForgeQA",
+  "tree": {
+    "$className": "DataModel",
+    "Workspace": {
+      "$className": "Workspace",
+      "Baseplate": {
+        "$className": "Part",
+        "$properties": {
+          "Anchored": true,
+          "Size": [512, 20, 512],
+          "Position": [0, -10, 0],
+          "Locked": true
+        }
+      },
+      "SpawnLocation": {
+        "$className": "SpawnLocation",
+        "$properties": {"Anchored": true, "Size": [12, 1, 12], "Position": [0, 0.5, 0]}
+      }
+    }
+  }
+}

@@ -309,3 +309,21 @@ def test_tampered_rojo_binary_is_refused(game, monkeypatch):
     monkeypatch.setattr(sync, "ROJO_SHA256", "0" * 64)
     with pytest.raises(sync.SyncError, match="unexpected sha256"):
         sync.build_payload(game)
+
+
+def test_untitled_local_place_is_found_by_its_datamodel_name(fake, game, monkeypatch):
+    import roblox_bridge.ops as ops_mod
+
+    studios = [{"id": "start-page", "name": None}, {"id": "qa", "name": None}]
+    factory = fake(tools=STUDIO_TOOLS, studios=studios)
+    real = Bridge.name_untitled
+
+    def fake_names(self, data):  # the fake server cannot run game.Name per session
+        return data | {"studios": [{"id": "start-page", "name": None},
+                                   {"id": "qa", "name": "ForgeQA (local file)"}]}
+
+    monkeypatch.setattr(Bridge, "name_untitled", fake_names)
+    report = run_job(core(game, studio_name="ForgeQA"), factory)
+    assert report["status"] == "PASS" and report["studio_id"] == "qa"
+    monkeypatch.setattr(Bridge, "name_untitled", real)
+    assert ops_mod.PLACE_NAME_LUAU == "return game.Name"
