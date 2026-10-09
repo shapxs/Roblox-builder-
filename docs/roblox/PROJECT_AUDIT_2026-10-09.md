@@ -107,7 +107,8 @@ the code-path defects.
 ### Fix status after this audit
 
 The six release-path items above are implemented in the isolated
-`~/Voya/AutoDevFactory-roblox` worktree. Shipping now uses the task gate's Studio
+`~/Voya/AutoDevFactory-roblox` worktree and fast-forwarded into the live Forge checkout.
+Shipping now uses the task gate's Studio
 lock, validation, timeout recovery, and quarantine; each run has unique scratch paths;
 unsafe CLI game names fail before file operations; static failures skip Studio and
 produce a diagnostic even when Rojo cannot build. Candidate assessment requires the
@@ -121,8 +122,9 @@ edge-report tampering, unsafe names, failed static builds, and manifest edits.
 The game template and both existing game copies now assign an ordered save revision to
 each snapshot and a generation to each loaded session. A delayed older save is refused,
 and a retry keeps its original revision and generation. Headless tests cover reversed
-completion and a later load in the same server. These changes have **not** been merged into the live Forge checkout or
-validated in live Studio; rerun shipping on a disposable QA game before relying on
+completion and a later load in the same server. The code changes are merged into the
+live Forge checkout but have **not** been validated in live Studio; rerun shipping on
+a disposable QA game before relying on
 new approval cards. Candidates created under the earlier release evidence policy
 should be regenerated under `roblox-release/3`.
 
@@ -269,7 +271,7 @@ should be regenerated under `roblox-release/3`.
 
 ## Suggested implementation order
 
-1. Merge and live-test the isolated release-path fixes on a disposable QA game.
+1. Live-test the merged release-path fixes on a disposable QA game.
 2. Run a private persistence test for the template and existing-game save fix.
 3. Build and test the exact frozen place in disposable QA; prove staging still uploads
    the identical hash. This is the main release-integrity milestone.
@@ -299,5 +301,11 @@ After the fixes, complete local checks passed for the template and both game cop
 passed 868 tests and skipped 71 when the localhost-only Ollama integration module was
 excluded; its 12 tests could not set up because this sandbox denies binding a localhost
 test server. The focused release suite passed 72 tests. The fixes are recorded as
-commits `9b412b8` (isolated Forge branch), `1616f82` (this workspace), and `2c8770a`
-(generated mushroom game). The live Forge checkout was not modified.
+commits `9b412b8` and `97ed264` (isolated Forge branch), `1616f82` (this workspace),
+and `2c8770a` (generated mushroom game). The live Forge checkout was fast-forwarded to `97ed264`;
+its unrelated local edits were preserved. No Forge process was restarted.
+An AppleScript normal quit was attempted for the earlier Studio restart request, but
+Studio returned `User canceled` and remained open. It was not force-quit; live capture,
+edge-case, exact-place, phone, and two-player checks remain unverified.
+The focused release suite also passed 72 tests from the live checkout after the merge;
+Ruff passed on the changed Forge files.
