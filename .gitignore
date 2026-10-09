@@ -12,3 +12,4 @@ legacy/**/*.duckdb
 __pycache__/
 .pytest_cache/
 queue/
+/ForgeQA.rbxl
