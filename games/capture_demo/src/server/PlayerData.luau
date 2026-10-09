@@ -70,9 +70,11 @@ function PlayerData.save(userId: number, state: Economy.State, release: boolean)
 		return false
 	end
 	local snapshot = { cash = state.cash, carried = state.carried, level = state.level }
+	local profileKey = key(userId)
+	local token = sessions:beginSave(profileKey)
 	for attempt = 1, SAVE_ATTEMPTS do
-		local result = sessions:save(key(userId), snapshot, release)
-		if result == "saved" then
+		local result = sessions:save(profileKey, snapshot, release, token)
+		if result == "saved" or result == "superseded" then
 			return true
 		elseif result == "lost_session" then
 			warn("[PlayerData] another server owns this profile; not saving", userId)

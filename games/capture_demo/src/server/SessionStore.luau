@@ -17,12 +17,18 @@ local SessionStore = {}
 SessionStore.__index = SessionStore
 
 export type LoadResult = "loaded" | "new" | "locked" | "failed" | "corrupt"
-export type SaveResult = "saved" | "lost_session" | "failed"
+export type SaveResult = "saved" | "superseded" | "lost_session" | "failed"
 
 local STALE_AFTER_SECONDS = 600 -- a lock this old belongs to a crashed server
 
 function SessionStore.new(store: any, sessionId: string, clock: () -> number)
-	return setmetatable({ store = store, sessionId = sessionId, clock = clock }, SessionStore)
+	return setmetatable({
+		store = store,
+		sessionId = sessionId,
+		clock = clock,
+		revisions = {} :: { [string]: number },
+		generations = {} :: { [string]: number },
+	}, SessionStore)
 end
 
 function SessionStore.load(self: any, key: string): (LoadResult, any)
@@ -43,9 +49,12 @@ function SessionStore.load(self: any, key: string): (LoadResult, any)
 				return nil
 			end
 			result = if old and old.data ~= nil then "loaded" else "new"
+			local generation = ((old and old.generation) or 0) + 1
 			return {
 				data = old and old.data,
-				session = { id = self.sessionId, at = self.clock() },
+				session = { id = self.sessionId, at = self.clock(), generation = generation },
+				generation = generation,
+				saveRevision = 0,
 				version = (old and old.version) or 0,
 			}
 		end)
@@ -54,23 +63,56 @@ function SessionStore.load(self: any, key: string): (LoadResult, any)
 		return "failed", nil
 	end
 	if result == "loaded" or result == "new" then
+		self.generations[key] = record.generation
+		self.revisions[key] = 0
 		return result, record and record.data
 	end
 	return result, nil
 end
 
-function SessionStore.save(self: any, key: string, data: any, release: boolean): SaveResult
+function SessionStore.beginSave(self: any, key: string): any
+	local revision = (self.revisions[key] or 0) + 1
+	self.revisions[key] = revision
+	return { revision = revision, generation = self.generations[key] }
+end
+
+function SessionStore.save(
+	self: any,
+	key: string,
+	data: any,
+	release: boolean,
+	token: any?
+): SaveResult
+	local writeToken = token or self:beginSave(key)
+	local generation = writeToken.generation
+	if generation == nil then
+		return "lost_session"
+	end
+	local writeRevision = writeToken.revision
 	local result: SaveResult = "failed"
 	local ok = pcall(function()
 		self.store:UpdateAsync(key, function(old: any): any
-			if type(old) ~= "table" or not old.session or old.session.id ~= self.sessionId then
+			if
+				type(old) ~= "table"
+				or not old.session
+				or old.session.id ~= self.sessionId
+				or old.session.generation ~= generation
+			then
 				result = "lost_session"
+				return nil
+			end
+			if (old.saveRevision or 0) >= writeRevision then
+				result = "superseded"
 				return nil
 			end
 			result = "saved"
 			return {
 				data = data,
-				session = if release then nil else { id = self.sessionId, at = self.clock() },
+				session = if release
+					then nil
+					else { id = self.sessionId, at = self.clock(), generation = generation },
+				generation = generation,
+				saveRevision = writeRevision,
 				version = (old.version or 0) + 1,
 			}
 		end)

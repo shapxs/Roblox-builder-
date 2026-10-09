@@ -14,8 +14,9 @@ model's hands entirely.
 
 ## Safety properties
 
-- Jobs name operations from a fixed list: `LIST_STUDIOS`, `LIST_TOOLS`, `INSPECT`,
-  `START_PLAYTEST`, `PROBE`, `GET_LOGS`, `STOP_PLAYTEST`. Jobs cannot supply tool names
+- Jobs name operations from a fixed list, including `LIST_STUDIOS`, `SYNC`,
+  `START_PLAYTEST`, `HEALTH`, `SCENARIO`, `GET_LOGS`, and `STOP_PLAYTEST`.
+  Jobs cannot supply tool names
   or Luau. Every snippet that reaches Studio is a constant in `ops.py`.
 - Unknown job keys, unknown ops, bad ids, and oversized timeouts are rejected.
 - Every MCP call has a hard timeout. A playtest that was started is always stopped,
@@ -31,6 +32,10 @@ model's hands entirely.
 cd ~/Roblox\ Games/bridge
 .venv/bin/roblox-bridge tools          # real tool names + params (Studio must be open)
 .venv/bin/roblox-bridge at002          # acceptance test AT-002
+.venv/bin/roblox-bridge check capture --project ../games/capture_demo \
+  --studio-name ForgeQA --scenario core_loop --scenario-dir ../policy/_baseline/scenarios
+.venv/bin/roblox-bridge recover --studio-name ForgeQA
+.venv/bin/roblox-bridge source-hash --project ../games/capture_demo
 .venv/bin/roblox-bridge serve ../queue # process queue/jobs/*.json -> queue/results/
 .venv/bin/pytest -q                    # tests against a fake MCP server
 ```
@@ -48,7 +53,8 @@ Live facts the bridge depends on:
   `get_console_output`, `execute_luau {code, datamodel_type: Edit|Server|Client}`.
 - `start_stop_play` returns before the server has a player; START_PLAYTEST polls the
   Server DataModel until one joins (45 s cap).
-- Also offered and not yet used: `screen_capture`, `character_navigation`,
-  `user_mouse_input`, `user_keyboard_input`, `search_game_tree`, `inspect_instance`,
+- Scenario runs now use `screen_capture`, `character_navigation`,
+  `user_keyboard_input`, and `user_mouse_input`. Other offered tools include
+  `search_game_tree`, `inspect_instance`,
   `script_read`, `multi_edit`. Asset generation/insertion and `http_get` are deliberately
   not exposed.

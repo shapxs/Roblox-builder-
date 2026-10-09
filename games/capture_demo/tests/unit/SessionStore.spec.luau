@@ -108,4 +108,32 @@ tests["versions increase with every save"] = function()
 	eq(store.rows["p1"].version, 2, "version")
 end
 
+tests["an older in-flight save cannot replace a newer snapshot"] = function()
+	local store = SessionStore.MemoryStore.new()
+	local s = SessionStore.new(store, "server-A", clock)
+	s:load("p1")
+	local original = store.UpdateAsync
+	local race = true
+	function store.UpdateAsync(self: any, key: string, transform: (any) -> any): any
+		if race then
+			race = false
+			eq(s:save("p1", { cash = 20 }, false), "saved", "newer save")
+		end
+		return original(self, key, transform)
+	end
+	eq(s:save("p1", { cash = 10 }, false), "superseded", "older save refused")
+	eq(store.rows["p1"].data.cash, 20, "newer cash kept")
+end
+
+tests["a save from an earlier load cannot write into a later lease"] = function()
+	local store = SessionStore.MemoryStore.new()
+	local s = SessionStore.new(store, "server-A", clock)
+	s:load("p1")
+	local oldToken = s:beginSave("p1")
+	eq(s:save("p1", { cash = 10 }, true, oldToken), "saved", "old lease released")
+	s:load("p1")
+	eq(s:save("p1", { cash = 0 }, false, oldToken), "lost_session", "old lease refused")
+	eq(store.rows["p1"].data.cash, 10, "progress kept")
+end
+
 return tests
