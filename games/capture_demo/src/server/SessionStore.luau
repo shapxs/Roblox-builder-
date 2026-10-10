@@ -40,6 +40,17 @@ function SessionStore.load(self: any, key: string): (LoadResult, any)
 				return nil -- cancel: never overwrite what we cannot read
 			end
 			local session = old and old.session
+			-- A player can rejoin this server while PlayerRemoving is still saving.
+			-- Reclaiming our own lease here would invalidate that pending write and
+			-- load the older persisted snapshot. Wait for release instead.
+			if
+				session
+				and session.id == self.sessionId
+				and self.generations[key] == session.generation
+			then
+				result = "locked"
+				return nil
+			end
 			if
 				session
 				and session.id ~= self.sessionId

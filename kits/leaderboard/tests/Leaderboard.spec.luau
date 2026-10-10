@@ -15,10 +15,10 @@ local function eq(actual: any, expected: any, label: string)
 end
 
 local entries = {
-	{ name = "Ava", value = 50 },
-	{ name = "Ben", value = 120 },
-	{ name = "Cy", value = 50 },
-	{ name = "Di", value = 7 },
+	{ userId = 1, name = "Ava", value = 50 },
+	{ userId = 2, name = "Ben", value = 120 },
+	{ userId = 3, name = "Cy", value = 50 },
+	{ userId = 4, name = "Di", value = 7 },
 }
 
 tests["top is highest first with stable ties"] = function()
@@ -32,11 +32,20 @@ tests["top is highest first with stable ties"] = function()
 end
 
 tests["rankOf shares ranks on ties"] = function()
-	eq(Leaderboard.rankOf(entries, "Ben"), 1, "Ben")
-	eq(Leaderboard.rankOf(entries, "Ava"), 2, "Ava")
-	eq(Leaderboard.rankOf(entries, "Cy"), 2, "Cy shares rank")
-	eq(Leaderboard.rankOf(entries, "Di"), 4, "Di")
-	eq(Leaderboard.rankOf(entries, "Zed"), nil, "absent")
+	eq(Leaderboard.rankOf(entries, 2), 1, "Ben")
+	eq(Leaderboard.rankOf(entries, 1), 2, "Ava")
+	eq(Leaderboard.rankOf(entries, 3), 2, "Cy shares rank")
+	eq(Leaderboard.rankOf(entries, 4), 4, "Di")
+	eq(Leaderboard.rankOf(entries, 5), nil, "absent")
+end
+
+tests["duplicate display names retain distinct identities"] = function()
+	local sameName = {
+		{ userId = 8, name = "Same", value = 10 },
+		{ userId = 9, name = "Same", value = 20 },
+	}
+	eq(Leaderboard.rankOf(sameName, 8), 2, "first user")
+	eq(Leaderboard.rankOf(sameName, 9), 1, "second user")
 end
 
 tests["abbreviate large numbers"] = function()

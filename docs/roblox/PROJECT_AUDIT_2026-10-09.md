@@ -130,6 +130,26 @@ should be regenerated under `roblox-release/3`.
 
 ## Re-audit of the current build — 2026-10-09
 
+### Implementation update — 2026-10-09
+
+The same-server rejoin guard is now in the template, capture demo, and generated
+mushroom game, with a regression that interleaves a departing save and a new load.
+The installer now preflights every destination, refuses linked or escaping paths,
+stages writes, and rolls back failures. Host-side regressions cover the symlink,
+late conflict, file tampering, deleted kit test, and forged lock. A new
+`tools/check_kits.py` compares installed kit files and lock entries with the
+controller-owned kit sources; `tools/check.sh` runs it and requires every catalog
+kit for games in `forge-games/`. Leaderboard ranking now uses `UserId`, including
+a duplicate-display-name regression. All three game check suites and the host
+kit tests passed after these edits.
+
+The Forge sandbox gate runner does **not yet** call `check_kits.py` on task
+worktrees, so its merge/release path still lacks this deterministic acceptance
+check. The unlock world helper, capture retention, dedicated exact-place QA,
+vision review, and mobile/two-player checks also remain open. The rejoin test
+covers the deterministic local race, not a real DataStore retry with an unknown
+write outcome or shutdown timing. Those remain release-readiness work.
+
 This pass includes the newer system-kit work (`Roblox Games` commit `3dccb72`),
 the Forge planner/builder commits through `87b3f08`, and the save/release fixes above.
 The three uncommitted atmosphere-kit files were inspected but left untouched. The

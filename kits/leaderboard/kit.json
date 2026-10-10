@@ -6,8 +6,8 @@
   "usage": [
     "Leaderboard.define(player, {\"Cash\", \"Mushrooms\"})  -- on PlayerAdded, up to 4 stats",
     "Leaderboard.set(player, stat, value) / Leaderboard.get(player, stat)",
-    "Leaderboard.top(Leaderboard.snapshot(Players:GetPlayers(), stat), 5) -> {name, value}[]",
-    "Leaderboard.rankOf(entries, name); Leaderboard.abbreviate(1250) -> \"1.2K\""
+    "Leaderboard.top(Leaderboard.snapshot(Players:GetPlayers(), stat), 5) -> {userId, name, value}[]",
+    "Leaderboard.rankOf(entries, userId); Leaderboard.abbreviate(1250) -> \"1.2K\""
   ],
   "files": [
     {

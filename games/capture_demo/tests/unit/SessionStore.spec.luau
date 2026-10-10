@@ -136,4 +136,17 @@ tests["a save from an earlier load cannot write into a later lease"] = function(
 	eq(store.rows["p1"].data.cash, 10, "progress kept")
 end
 
+tests["a same-server rejoin waits for the departing save"] = function()
+	local store = SessionStore.MemoryStore.new()
+	local s = SessionStore.new(store, "server-A", clock)
+	s:load("p1")
+	s:save("p1", { cash = 90 }, false)
+	local pendingRelease = s:beginSave("p1")
+	eq((s:load("p1")), "locked", "rejoin waits for release")
+	eq(s:save("p1", { cash = 100 }, true, pendingRelease), "saved", "departure saved")
+	local status, data = s:load("p1")
+	eq(status, "loaded", "rejoin loaded")
+	eq(data.cash, 100, "latest progress loaded")
+end
+
 return tests

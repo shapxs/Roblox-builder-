@@ -18,6 +18,12 @@ mkdir -p artifacts
 
 gate() { printf '%-10s ' "$1"; shift; if out="$("$@" 2>&1)"; then echo PASS; else echo FAIL; echo "$out" | tail -40; exit 1; fi; }
 
+if [[ "$GAME" == "$ROOT/forge-games/"* ]]; then
+  gate kits python3 "$ROOT/tools/check_kits.py" "$GAME" --all
+else
+  gate kits python3 "$ROOT/tools/check_kits.py" "$GAME"
+fi
+
 gate format    stylua --check src tests
 gate lint      selene src
 gate sourcemap rojo sourcemap default.project.json --output artifacts/sourcemap.json

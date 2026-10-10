@@ -8,7 +8,7 @@
 --   Leaderboard.set(player, "Mushrooms", total)
 --   local top = Leaderboard.top(Leaderboard.snapshot(Players:GetPlayers(), "Mushrooms"), 5)
 
-export type Entry = { name: string, value: number }
+export type Entry = { userId: number, name: string, value: number }
 
 local Leaderboard = {}
 
@@ -55,19 +55,23 @@ end
 function Leaderboard.snapshot(players: { Player }, stat: string): { Entry }
 	local entries: { Entry } = {}
 	for _, player in players do
-		table.insert(entries, { name = player.DisplayName, value = Leaderboard.get(player, stat) })
+		table.insert(entries, {
+			userId = player.UserId,
+			name = player.DisplayName,
+			value = Leaderboard.get(player, stat),
+		})
 	end
 	return entries
 end
 
--- Highest first; ties broken by name so the order is stable. Pure: no Roblox API.
+-- Highest first; ties broken by unique user ID so the order is stable.
 function Leaderboard.top(entries: { Entry }, n: number): { Entry }
 	local sorted = table.clone(entries)
 	table.sort(sorted, function(a: Entry, b: Entry): boolean
 		if a.value ~= b.value then
 			return a.value > b.value
 		end
-		return a.name < b.name
+		return a.userId < b.userId
 	end)
 	local out: { Entry } = {}
 	for i = 1, math.min(n, #sorted) do
@@ -76,11 +80,11 @@ function Leaderboard.top(entries: { Entry }, n: number): { Entry }
 	return out
 end
 
--- 1-based rank of `name` in `entries` (ties share a rank), or nil if absent.
-function Leaderboard.rankOf(entries: { Entry }, name: string): number?
+-- 1-based rank of a user ID in `entries` (ties share a rank), or nil if absent.
+function Leaderboard.rankOf(entries: { Entry }, userId: number): number?
 	local mine: number? = nil
 	for _, e in entries do
-		if e.name == name then
+		if e.userId == userId then
 			mine = e.value
 		end
 	end
