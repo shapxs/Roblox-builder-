@@ -9,15 +9,15 @@ small, reliable games that people enjoy and return to, with human approval for p
 
 This audit covers this Git repository (`~/Roblox Games`), its bridge, template, policy,
 scripts, documents, and the current ignored `forge-games/` output. It also traces the
-connected implementation in `~/Voya/AutoDevFactory-roblox` **read-only**. The running
-Forge checkout, Studio, Telegram, and Open Cloud were not exercised. The master file
+connected implementation in `~/Voya/AutoDevFactory-roblox` and the live Forge checkout.
+This re-audit did not exercise Studio, Telegram, or Open Cloud. The master file
 `FORGE_ROBLOX_STUDIO_IMPLEMENTATION.md` is absent, so this is an implementation audit,
 not a compliance audit against that original spec. The June `legacy/` prototype is
 reference material; it is not the runtime path.
 
 Current state: the bridge has a fixed MCP operation list, a dedicated local QA place,
 strict health checks, controller-owned policy tests/scenarios, release evidence binding,
-and staging publishing. `capture_demo` was published to private staging on 2026-10-09
+staging publishing, and four reusable system kits. `capture_demo` was published to private staging on 2026-10-09
 ([publishing record](PUBLISHING.md)). Batch A–C work is present. The
 [builder comparison](evidence/builder-comparison-2026-10-08.md) is one task per model;
 1.9 minutes is an encouraging smoke result, not a qualified fleet-wide speed claim.
@@ -128,6 +128,97 @@ a disposable QA game before relying on
 new approval cards. Candidates created under the earlier release evidence policy
 should be regenerated under `roblox-release/3`.
 
+## Re-audit of the current build — 2026-10-09
+
+This pass includes the newer system-kit work (`Roblox Games` commit `3dccb72`),
+the Forge planner/builder commits through `87b3f08`, and the save/release fixes above.
+The three uncommitted atmosphere-kit files were inspected but left untouched. The
+following are **new or still-live findings**; they supersede the older ranking where
+there is a conflict.
+
+1. **P0: a quick rejoin to the same server can lose the departing player's last
+   progress.** `SessionStore.load` accepts a record owned by the same server and
+   increments its generation (`games/_template/src/server/SessionStore.luau:42-68`).
+   `PlayerRemoving` may still be inside a yielding save while `PlayerAdded` loads the
+   same key. The new load returns the older stored snapshot and changes generation;
+   the pending release save then gets `lost_session` (`:94-105`). An isolated Lune
+   interleaving produced `rejoin_cash=90`, `pending_release=lost_session`, and
+   `persisted_cash=90` after the departing state reached 100. The previous fix
+   correctly rejects out-of-order writes, but this lifecycle gap remains in the
+   template, `capture_demo`, and the generated mushroom game. Serialize loads and
+   saves **per player key**, or keep the pending departure snapshot and make a same-
+   server rejoin await/consume it before opening a new lease. Test rapid leave/rejoin,
+   save retry with unknown outcome, and shutdown interleavings. Roblox's
+   [data-store best practices](https://create.roblox.com/docs/cloud-services/data-stores/best-practices)
+   explicitly call for ordered per-key retries and caution that a failed response may
+   follow a completed write. Do this before treating the save system as release-ready.
+
+2. **P1: reinstalling a kit into a game can write outside that game.**
+   `tools/add_kit.sh:30-45` trusts the game-owned `kits.lock.json` and follows a
+   destination symlink. In a temporary fixture, a symlink under the game pointed at
+   a file outside it; a matching lock digest let `shutil.copy2` overwrite that outside
+   file. Forge's automatic new-game path installs before a builder edits the repo,
+   which limits the current path. Manual upgrades or reuse on builder-edited repos
+   expose the host write. Refuse symlinks in every destination component, validate
+   resolved sources and destinations against their roots, and never use a game-owned
+   lock as authority to cross the game boundary. Add a symlink and forged-lock test.
+
+3. **P1: a kit conflict leaves a partial installation.** The installer copies files
+   one at a time and writes `kits.lock.json` only after every kit (`add_kit.sh:32-45`).
+   A temporary fixture with a conflicting second file exited 1 after installing the
+   first module, with no lock written. Preflight *all* files for *all* requested kits,
+   then stage and atomically replace files and the lock, or roll back on failure.
+   Test a conflict late in `--all` and confirm the game tree is unchanged.
+
+4. **P1 before using per-player unlocks: the world helper changes shared state.**
+   `kits/unlocks/src/Unlocks.luau:80-101` changes `Transparency` and `CanCollide` on
+   Workspace parts based on one `level`. If a server calls it for different players,
+   the last call controls the world seen by everyone; if called on one client, the
+   server's collision authority can disagree with what that client sees. It also
+   restores unannotated parts to transparency 0 and collision true, losing their
+   original properties, and rewalks descendants for each tagged ancestor. State the
+   kit's intended shared-world or per-player contract, separate visual access from
+   server-authoritative interaction, preserve original properties, and test two
+   players plus nested tagged models. Roblox's
+   [client-server replication guide](https://create.roblox.com/docs/projects/client-server)
+   explains why server changes to Workspace affect connected clients.
+
+5. **P1: kit integrity is a prompt rule, not an acceptance gate.**
+   Forge's game spec says builders must not edit `src/shared/Kits/*` or
+   `tests/unit/Kit_*` (`scripts/roblox_jobs.py:133-140`), but both and the game-owned
+   `kits.lock.json` are in the builder-editable repository. The test runner discovers
+   whatever `*.spec.luau` files remain; neither `tools/check.sh` nor the controller's
+   release policy compares installed files with an owner-controlled kit manifest.
+   A builder can change a kit and its test, or remove a kit test, without a deterministic
+   kit-integrity failure. In a temporary copy, removing the leaderboard spec still
+   produced a green `50 passed, 0 failed` run instead of the original 53 tests.
+   Keep a controller-owned expected file map per game/kit version,
+   check presence and hashes before merge and release, and make upgrades an explicit
+   owner-controlled operation. Test deletion, modification, and a forged game lock.
+
+6. **P2: leaderboard ranks use a non-unique identity.**
+   `kits/leaderboard/src/Leaderboard.luau:55-96` records `DisplayName` and
+   `rankOf` selects the last matching name. Two players can share a display name,
+   so one player's rank can be reported as the other's. Include `UserId` in entries,
+   rank by that ID, and use display names only for presentation. Roblox's
+   [Player reference](https://create.roblox.com/docs/reference/engine/classes/Player)
+   explicitly says display names are not unique.
+
+7. **P2: capture and shipping scratch need a retention rule.** At this pass,
+   `artifacts/captures/` contained 52 directories using about 521 MB, all recent;
+   shared shipping also keeps a unique frozen source directory for each attempt.
+   Keep the copied, hashed release artifacts and gate logs required for review, but
+   give unreferenced raw captures and reconstructible source copies a bounded
+   age/size policy. Avoid deleting material still referenced by pending approvals.
+
+The kit's six headless suites passed (53 tests), but these do not exercise Roblox
+Instance replication or the installer. The symlink, partial-install, kit-test deletion, and rejoin
+findings were reproduced only in isolated temporary fixtures; no live player data,
+real game files, or outside-home files were changed by those probes.
+The current Forge suite passed 880 tests with 71 skips when the 12 localhost-server
+Ollama integration tests were excluded; this sandbox cannot bind their test socket.
+This re-audit did not run live Studio, Telegram, or Roblox publishing.
+
 ## Remaining work, ranked
 
 **P0 — before a public game or broad unattended building**
@@ -147,12 +238,10 @@ should be regenerated under `roblox-release/3`.
 2. **Test the save-ordering fix live (M).**
    `games/_template/src/server/init.server.luau:156-174` spawns autosaves independently;
    `PlayerRemoving` and `BindToClose` can save the same player concurrently.
-   `src/server/SessionStore.luau:62-75` checks the session ID, but has no revision
-   attached to an in-flight snapshot. An older autosave that commits after a newer one
-   can roll back progress while the same server owns the lock. The template now uses
-   ordered revisions and has a reversed-completion test. Both current game copies have
-   the fix; exercise leave/shutdown races in a private staging experience.
-   This is a code-path risk, not a reproduced live loss.
+   The template and both current games now have ordered revisions and a reversed-
+   completion test. Resolve the same-server rejoin race in the re-audit above, then
+   exercise leave/rejoin and shutdown in a private staging experience. The new race
+   was reproduced headlessly, not as a live player-data loss.
 
 3. **Split universal acceptance from the template economy policy (M).**
    `policy/_baseline/tests/run.luau:9-15` loads one `Economy.luau` API and the baseline
@@ -244,15 +333,13 @@ should be regenerated under `roblox-release/3`.
 **P2 — clarity and extension**
 
 11. **Refresh the operator documentation (S).**
-    `README.md:1-28` still says to add the missing master spec and omits `policy/`,
-    `qa-place/`, `forge-games/`, and publishing. `docs/roblox/HOST_BRIDGE.md:15-54`
-    still lists only the original bridge ops and says screenshot/navigation tools are
-    unused. `docs/roblox/ROBLOX_INTEGRATION_PLAN.md:46-85` mixes old plans with reached
-    milestones, and its final note says the proof uses a custom runner despite the
-    newer production-path proof. Write one current operator map; archive historical
-    milestones as dated history. Acceptance: a new maintainer can identify the live
-    controller, game repository, policy, QA place, release path, and recovery command
-    without reading contradictory instructions.
+    The root README and `HOST_BRIDGE.md` now cover the current layout and bridge
+    operations. `docs/roblox/ROBLOX_INTEGRATION_PLAN.md:46-85` still mixes old plans
+    with reached milestones, and its final note says the proof uses a custom runner
+    despite the newer production-path proof. Archive historical milestones as dated
+    history and keep one operator map current. Acceptance: a new maintainer can
+    identify the live controller, game repository, policy, QA place, release path,
+    and recovery command without reading contradictory instructions.
 
 12. **Avoid treating a readable screenshot as a vision verdict (M).**
     The planned local vision review should compare full screen and HUD crops across
@@ -271,14 +358,16 @@ should be regenerated under `roblox-release/3`.
 
 ## Suggested implementation order
 
-1. Live-test the merged release-path fixes on a disposable QA game.
-2. Run a private persistence test for the template and existing-game save fix.
-3. Build and test the exact frozen place in disposable QA; prove staging still uploads
+1. Close the same-server save/rejoin race; harden kit installation and enforce kit
+   integrity before any kit upgrade on a builder-edited game. Add regressions.
+2. Live-test the merged release-path fixes and persistence on a disposable QA game.
+3. Define safe per-player unlock and leaderboard identity behavior; test two players.
+4. Build and test the exact frozen place in disposable QA; prove staging still uploads
    the identical hash. This is the main release-integrity milestone.
-4. Separate universal and mechanic-specific policy, then validate design promises.
-5. Add phone/two-player checks and one private DataStore smoke test.
-6. Benchmark capture and builders; adopt faster options only with measured quality.
-7. Add analytics and calibrated visual review after at least one player-tested game.
+5. Separate universal and mechanic-specific policy, then validate design promises.
+6. Add phone/two-player checks and one private DataStore smoke test.
+7. Benchmark capture and builders; adopt faster options only with measured quality.
+8. Add analytics and calibrated visual review after at least one player-tested game.
 
 ## Verification and limits
 
